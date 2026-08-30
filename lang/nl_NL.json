@@ -68,6 +68,16 @@
       "textiel": "Textiel",
       "sorti": "Gesorteerd afval",
       "duo": "Duobak"
+    },
+    "ui": {
+      "text_styling": "Tekstopmaak",
+      "first_pickup_row": "Eerste ophaalregel",
+      "pickup_rows_other": "Ophaalregels 2+",
+      "font_size": "Lettergrootte",
+      "font_color": "Tekstkleur",
+      "kliko_image": "Kliko-afbeelding",
+      "kliko_scale": "Kliko-schaal (%)",
+      "kliko_scale_help": "100 = normale grootte, 80 = 80%, 125 = 125%. Laat leeg om de grootte van het thema te gebruiken."
     }
   },
   "misc": {
@@ -622,9 +632,13 @@
       "garbage_maxitems": "Aantal ophaaldagen weer te geven",
       "garbage_maxdays": "Maximaal aantal dagen vooruit",
       "garbage_maxdays_help": "Maximaal aantal dagen vooruit waarin wordt gezocht. Standaard: 32.",
+      "garbage_row1_color": "Tekstkleur regel 1",
+      "garbage_row1_fontsize": "Lettergrootte regel 1 (px)",
+      "garbage_row2_color": "Tekstkleur overige regels",
+      "garbage_row2_fontsize": "Lettergrootte overige regels (px)",
       "garbage_street": "Straat",
       "garbage_use_colors": "Tekstkleuren",
-      "garbage_use_cors_prefix": "Gebruik Cors Prefix (standaard is aan)",
+      "garbage_use_cors_prefix": "Gebruik Cors Prefix",
       "garbage_use_names": "Aangepaste namen",
       "garbage_use_prefix_help": "De Cors Prefix kan soms fouten veroorzaken.",
       "garbage_width": "Breedte van het blok (1-12)",
