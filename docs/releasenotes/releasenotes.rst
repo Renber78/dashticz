@@ -6,6 +6,43 @@ For Dashticz's **beta** version Release Notes go to: https://dashticz.readthedoc
 For Dashticz's **master** version Release Notes go to: https://dashticz.readthedocs.io/en/master/releasenotes/index.html
 
 
+v4.0.3 beta (4-9-2026)
+----------------------
+
+* **Fixes**
+
+- A viewport/orientation change could leave the active screen
+  scrolled off-canvas to the side, with no way back short of a
+  reload. ``startSwiper()``'s Swiper instance positions slides
+  purely via CSS transform, but some browsers (reproduced
+  consistently in headless Chromium) could leave the ``.swiper``
+  container's native ``scrollLeft`` stuck at a nonzero value after
+  a resize landed mid-reflow. A window resize handler now forces
+  it back to ``0``.
+
+* **Code**
+
+- Added a ``.githooks/pre-push`` hook that runs ``npm run
+  format:check && npm test`` before every push. The existing
+  pre-commit hook only checked formatting, so a broken test could
+  still reach a push and only get caught by CI.
+
+- Set ``expect.toHaveScreenshot.maxDiffPixelRatio`` to ``0.02`` in
+  ``playwright.config.js`` so the visual-regression suite tolerates
+  sub-percent rendering noise (anti-aliasing/font hinting) instead
+  of failing pixel-exact snapshot diffs a human wouldn't perceive
+  as a real change.
+
+- Root-caused the actual recurring CI flake: a chromium-only
+  drag-and-drop assertion in ``tests/gridlayout.spec.js`` ("places
+  blocks at explicit coordinates and stacks on mobile") that turned
+  out to be the scrollLeft bug above, not test flakiness -
+  Playwright's webkit job had passed in every failing run sampled,
+  so the working assumption that webkit was the flaky browser job
+  did not hold up. Verified with 14 repeated local runs of the
+  previously-failing test (0 failures) plus a new source-shape
+  regression test for the resize handler.
+
 v4.0.2 beta (3-9-2026)
 ----------------------
 
@@ -35,6 +72,11 @@ v4.0.2 beta (3-9-2026)
 
 - Enabled the CI workflow to also run on pushes to ``master``, not
   just ``beta``/``develop``/``test``.
+
+v4.0.1 master (3-9-2026)
+------------------------
+
+Master version derived from beta 4.0.1. See below.
 
 v4.0.1 beta (2-9-2026)
 ----------------------
