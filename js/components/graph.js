@@ -1233,8 +1233,13 @@ function createDataSets(graph, mergedBlock, graphProperties) {
 }
 
 function createHeader(graph) {
+  // Icon size is a themed default (.graphtitle .icon in css/creative.css
+  // reads the same --icon-font-size custom property a theme sets for
+  // every other block's icon) rather than this hardcoded 20px - color
+  // stays a per-graph override (graph.block.iconColour), an existing,
+  // deliberately user-configurable CONFIG.js property.
   var html =
-    '<div class="graphheader"><div class="graphtitle"><i class="fas fa-chart-bar" style="font-size:20px;margin-left:5px;color:' +
+    '<div class="graphheader"><div class="graphtitle"><i class="fas fa-chart-bar icon" style="margin-left:5px;color:' +
     graph.block.iconColour +
     '">&nbsp;</i>' +
     graph.title +
@@ -1342,7 +1347,7 @@ function createButtons(graph, ranges, customRange) {
         btnText +
         '</button> ';
       $(newButton)
-        .click(function () {
+        .on('click', function () {
           getGraphData(graph, item);
         })
         .appendTo($buttons);
@@ -1397,7 +1402,7 @@ function createButtons(graph, ranges, customRange) {
       '">&nbsp;</i>&nbsp;' +
       language.graph.show_data +
       '</a></li>';
-    var $newLi = $(newLi).click(function () {
+    var $newLi = $(newLi).on('click', function () {
       showData(graph);
       return false;
     });
@@ -1585,7 +1590,7 @@ function showData(graph) {
 
     $('#modal_' + graphIdx)
       .find('#logbutton')
-      .click(function () {
+      .on('click', function () {
         console.log(graph);
         return false;
       });

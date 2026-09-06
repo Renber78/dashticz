@@ -1071,6 +1071,123 @@
     return 'device_' + base + (sub > 0 ? '_' + sub : '');
   }
 
+  function deviceReferenceCandidates(idx, subidx) {
+    var candidates = [];
+    function add(value) {
+      if (value === null || typeof value === 'undefined') return;
+      value = String(value).trim();
+      if (value && candidates.indexOf(value) === -1) candidates.push(value);
+    }
+    add(stableDeviceReference(idx, subidx));
+    if (idx) {
+      add(String(idx) + (subidx ? '_' + subidx : ''));
+      // A bare base idx is ambiguous for a sub-device: it can be the source
+      // of the main device's own Automation. Looking it up remains useful at
+      // runtime for backwards compatibility, but automatic removal must not
+      // delete it when only a sub-device is removed.
+      if (!subidx) add(idx);
+    }
+    return candidates;
+  }
+
+  function deviceIdentity(value) {
+    var definition = value;
+    if (typeof value === 'string' && window.blocks && window.blocks[value]) {
+      definition = window.blocks[value];
+    }
+
+    var rawIdx =
+      definition && typeof definition === 'object'
+        ? definition.idx
+        : definition;
+    var rawSubidx =
+      definition && typeof definition === 'object' ? definition.subidx : 0;
+    if (/^s\d+$/.test(String(rawIdx || ''))) {
+      return { idx: String(rawIdx), subidx: 0 };
+    }
+    var match = String(rawIdx || '').match(/^\d+(?:_\d+)?$/)
+      ? String(rawIdx).match(/^(\d+)(?:_(\d+))?$/)
+      : null;
+    if (!match || parseInt(match[1], 10) < 1) return null;
+    return {
+      idx: parseInt(match[1], 10),
+      subidx: match[2] ? parseInt(match[2], 10) : parseInt(rawSubidx, 10) || 0,
+    };
+  }
+
+  // Count how often a device is currently placed anywhere in the dashboard,
+  // including classic columns, grid screens, responsive screen profiles and
+  // standby. Removal flows compare this count with the number of occurrences
+  // they are actually deleting, so a rule source shared by another screen is
+  // never wiped along with one tile.
+  function dashboardDeviceOccurrenceCount(idx, subidx) {
+    var targetIdx = String(idx || '');
+    var targetSubidx = parseInt(subidx, 10) || 0;
+    var count = 0;
+    var referencedColumns = 0;
+    var seenContainers = [];
+
+    function countEntries(entries) {
+      if (!Array.isArray(entries)) return;
+      entries.forEach(function (entry) {
+        var identity = deviceIdentity(entry);
+        if (
+          identity &&
+          String(identity.idx) === targetIdx &&
+          identity.subidx === targetSubidx
+        ) {
+          count++;
+        }
+      });
+    }
+
+    function countColumn(columnKey, collection) {
+      if (!collection || !collection[columnKey]) return;
+      referencedColumns++;
+      countEntries(collection[columnKey].blocks);
+    }
+
+    function scanScreenTree(container) {
+      if (!container || typeof container !== 'object') return;
+      if (seenContainers.indexOf(container) !== -1) return;
+      seenContainers.push(container);
+
+      countEntries(container.blocks);
+      if (Array.isArray(container.columns)) {
+        container.columns.forEach(function (columnKey) {
+          countColumn(columnKey, window.columns);
+        });
+      }
+
+      Object.keys(container).forEach(function (key) {
+        if (key === 'blocks' || key === 'columns' || key === 'grid') return;
+        var child = container[key];
+        if (child && typeof child === 'object' && !Array.isArray(child)) {
+          scanScreenTree(child);
+        }
+      });
+    }
+
+    scanScreenTree(window.screens);
+    scanScreenTree(window.standby_screen);
+
+    if (window.columns_standby) {
+      Object.keys(window.columns_standby).forEach(function (columnKey) {
+        countColumn(columnKey, window.columns_standby);
+      });
+    }
+
+    // Older single-screen configurations may define columns without a
+    // screens object. Count those only as a fallback to avoid double-counting
+    // normal screen-referenced columns.
+    if (!referencedColumns && window.columns) {
+      Object.keys(window.columns).forEach(function (columnKey) {
+        countColumn(columnKey, window.columns);
+      });
+    }
+    return count;
+  }
+
   function sourceCandidatesForBlock(block) {
     var candidates = [];
     function add(value) {
@@ -1081,12 +1198,25 @@
     add(block && block.key);
     add(block && block.id);
     if (block) {
-      add(stableDeviceReference(block.idx, block.subidx));
-      if (block.idx) {
-        add(String(block.idx) + (block.subidx ? '_' + block.subidx : ''));
-        add(block.idx);
-      }
+      deviceReferenceCandidates(block.idx, block.subidx).forEach(add);
     }
+    return candidates;
+  }
+
+  // Same idea as sourceCandidatesForBlock(), but usable without a live,
+  // still-mounted block object - e.g. the Layout Editor's remove flow, where
+  // the item may already be unmounted (block.device cleared) by the time its
+  // saved Device Rules need cleaning up. reference is the item/order key a
+  // rule set may have been saved under in addition to the idx-derived forms.
+  function sourceCandidatesForRemoval(idx, subidx, reference) {
+    var candidates = [];
+    function add(value) {
+      if (value === null || typeof value === 'undefined') return;
+      value = String(value).trim();
+      if (value && candidates.indexOf(value) === -1) candidates.push(value);
+    }
+    add(reference);
+    deviceReferenceCandidates(idx, subidx).forEach(add);
     return candidates;
   }
 
@@ -2600,6 +2730,46 @@
     });
   }
 
+  // Wipes a source's saved Device Rules entirely - same request shape as
+  // saveDeviceRules() with an empty rule set, which savedevicerules.php
+  // already treats as "remove this source's managed block from custom.js/
+  // custom.css" (it only re-adds a block when rules or a handler is
+  // present). Used when a device is removed from a screen, so a
+  // re-added device with the same idx does not silently resurrect its old
+  // Automation config. No popup involved, so it does not go through
+  // saveDeviceRules()/readRuleRows().
+  function deleteSourceRules(source) {
+    source = String(source || '').trim();
+    if (!source) return $.Deferred().resolve().promise();
+    var phpPath =
+      window.settings && window.settings.dashticz_php_path
+        ? String(window.settings.dashticz_php_path)
+        : 'js/';
+    phpPath = phpPath.replace(/\/?$/, '/');
+    var cssFile = activeCssFilename();
+
+    return $.getJSON(phpPath + 'info.php?get=csrf')
+      .then(function (data) {
+        return $.ajax({
+          url: SAVE_URL,
+          method: 'POST',
+          dataType: 'json',
+          headers: { 'X-Dashticz-CSRF': data.token },
+          data: {
+            source: source,
+            schema_version: 2,
+            rules: '[]',
+            custom_js_handler: '',
+            css_file: cssFile,
+            custom_folder: activeCustomFolder(),
+          },
+        });
+      })
+      .done(function () {
+        updateRuleStore(source, [], '');
+      });
+  }
+
   function refreshActiveCustomCss(cssFile) {
     var path = activeCustomFolder() + '/' + cssFile;
     return $.ajax({
@@ -2929,6 +3099,9 @@
     updateRuleStore: updateRuleStore,
     reconcileSavedSource: reconcileSavedSource,
     sourceFromOrderKey: sourceFromOrderKey,
+    sourceCandidatesForRemoval: sourceCandidatesForRemoval,
+    dashboardDeviceOccurrenceCount: dashboardDeviceOccurrenceCount,
+    deleteSourceRules: deleteSourceRules,
     configForSource: configForSource,
     inferPopupSource: inferPopupSource,
     blockOptionData: blockOptionData,

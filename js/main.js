@@ -113,8 +113,20 @@ function loadConfig() {
   loadingFilename = _CFG.customfolder + '/' + configjs;
   return $.ajax({
     url: loadingFilename,
-    dataType: 'script',
-    dataFilter: function (source) {
+    // Loaded as plain text and evaluated explicitly (rather than
+    // dataType: 'script') because jQuery 4's script transport now loads
+    // same-origin scripts via a <script src> tag for this same-domain,
+    // non-JSONP, async request too (see jQuery's canUseScriptTag()), which
+    // never exposes response text to dataFilter - the placeholder check
+    // below needs the raw source before it's executed as JavaScript.
+    dataType: 'text',
+    cache: false,
+  }).then(
+    function (source) {
+      var tmp = loadingFilename;
+      loadingFilename = null;
+      if (throwError) return $.Deferred().reject(new Error(throwError));
+
       if (
         source.trim() === '#EMPTY#' &&
         !_PARAMS['cfg'] &&
@@ -124,15 +136,10 @@ function loadConfig() {
         // Treat it exactly like a missing first-run configuration instead.
         window.config = {};
         firstRunSetupRequired = true;
-        return '';
+        return;
       }
-      return source;
-    },
-  }).then(
-    function () {
-      var tmp = loadingFilename;
-      loadingFilename = null;
-      if (throwError) return $.Deferred().reject(new Error(throwError));
+
+      $.globalEval(source);
 
       if (typeof config == 'undefined') {
         return $.Deferred().reject(new Error('Error in ' + tmp));
@@ -1503,6 +1510,18 @@ function startSwiper() {
       $('.slide' + (1 + this.activeIndex)).addClass('selectedbutton');
     });
     $('.slide' + settings['start_page']).addClass('selectedbutton');
+
+    // Swiper positions slides purely via CSS transform here (no cssMode),
+    // so .swiper's own scrollLeft should always stay 0. Some browsers can
+    // still leave it stuck at a nonzero value after a viewport/orientation
+    // change lands mid-reflow, which shifts the whole active screen off to
+    // the side with nothing to bring it back short of a reload. Force it
+    // back to 0 on every resize, once layout has had a chance to settle.
+    $(window).on('resize.dashticz-swiper', function () {
+      setTimeout(function () {
+        if (myswiper && myswiper.el) myswiper.el.scrollLeft = 0;
+      }, 0);
+    });
   }, 100);
 }
 
