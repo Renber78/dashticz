@@ -374,6 +374,14 @@ var DashticzLayoutEditor = (function () {
     entries.forEach(_addPendingItem);
     _attachHandlers();
     if (gridMode) _refreshGridOverlaps();
+    // The Add popup already closed on its own, with no confirmation of its
+    // own (see _graftIntoLayoutEditor) - without this, nothing tells the
+    // user that the new tile is still only staged here and needs this
+    // editor's own Save, same as _removeItem's removed_one/removed_all
+    // reminder below.
+    if ($toolbar) {
+      $toolbar.find('.dle-toolbar-help').text(_t('added_pending'));
+    }
   }
 
   function _addPendingItem(entry) {
@@ -420,21 +428,26 @@ var DashticzLayoutEditor = (function () {
 
     if (gridMode) {
       var gridColumns = gridConfig.gridColumns;
+      var gridDefault = entry.gridDefaultSize;
       var gridWidth =
         entry.kind === 'separator'
           ? gridColumns
-          : Math.max(
-              MIN_GRID_WIDTH,
-              Math.min(gridColumns, Math.round((width12 * gridColumns) / 12))
-            );
+          : gridDefault
+            ? Math.max(MIN_GRID_WIDTH, Math.min(gridColumns, gridDefault.width))
+            : Math.max(
+                MIN_GRID_WIDTH,
+                Math.min(gridColumns, Math.round((width12 * gridColumns) / 12))
+              );
       var pixelHeight = entry.kind === 'separator' ? 60 : 120;
-      var gridHeight = Math.max(
-        minimumHeight,
-        Math.ceil(
-          (pixelHeight + gridConfig.gap) /
-            (gridConfig.rowHeight + gridConfig.gap)
-        )
-      );
+      var gridHeight = gridDefault
+        ? Math.max(minimumHeight, gridDefault.height)
+        : Math.max(
+            minimumHeight,
+            Math.ceil(
+              (pixelHeight + gridConfig.gap) /
+                (gridConfig.rowHeight + gridConfig.gap)
+            )
+          );
       var grid = _firstFreeGridPosition(
         items,
         1,
@@ -1465,7 +1478,15 @@ var DashticzLayoutEditor = (function () {
     }
 
     var rawIdx = typeof definition.idx !== 'undefined' ? definition.idx : ref;
-    var groupMatch = String(rawIdx).match(/^s\d+$/);
+    // 's<idx>' (scene/group) and 'v<idx>' (Domoticz variable, see
+    // js/domoticz-api.js's _setAllVariables() and
+    // docs/blocks/domoticzblocks.rst) are both valid non-numeric idx forms -
+    // without this, a variable-backed Custom Device fell through to the
+    // purely-numeric match below, returned null, and the item lost its
+    // config (cog) control entirely (or vanished from the Layout Editor's
+    // item list in classic column mode) - the same fate the comment above
+    // already documents for an untyped Group block.
+    var groupMatch = String(rawIdx).match(/^[sv]\d+$/);
     if (groupMatch) {
       var groupName = definition.title || key || String(rawIdx);
       return {
@@ -1936,6 +1957,20 @@ var DashticzLayoutEditor = (function () {
       .off('.layouteditor')
       .on('click.layouteditor', '.dle-cancel', _cancel)
       .on('click.layouteditor', '.dle-save', _save);
+
+    // A staged-but-unsaved tile (see addPendingItems) is otherwise lost
+    // with zero warning on a tab close/refresh/navigation, exactly like an
+    // un-confirmed Cancel discards it - see _cancel(). Namespaced and
+    // re-bound via off+on since _attachHandlers() runs again on every
+    // screen switch within one editing session.
+    $(window)
+      .off('beforeunload.layouteditor')
+      .on('beforeunload.layouteditor', function (event) {
+        if (!_hasPendingItems()) return;
+        event.preventDefault();
+        event.returnValue = '';
+        return '';
+      });
   }
 
   function _openItemConfig(item) {
@@ -2518,6 +2553,7 @@ var DashticzLayoutEditor = (function () {
         return cleanup;
       })
       .done(function () {
+        $(window).off('beforeunload.layouteditor');
         $toolbar.find('.dle-toolbar-help').text(_t('saved_reloading'));
         $save
           .removeClass('btn-primary')
@@ -2670,10 +2706,24 @@ var DashticzLayoutEditor = (function () {
     });
   }
 
+  /* Whether any item on screen is still only staged here (added via the
+     Add popup's own Save - see addPendingItems) and would be silently
+     discarded by cancelling out of this editor, same as the tile _cancel()
+     itself never persisted for a plain move/resize. */
+  function _hasPendingItems() {
+    return items.some(function (item) {
+      return item.isPending;
+    });
+  }
+
   function _cancel() {
     if (!active) return;
+    if (_hasPendingItems() && !window.confirm(_t('discard_pending_confirm'))) {
+      return;
+    }
     _finishPointerAction();
 
+    $(window).off('beforeunload.layouteditor');
     $(document).off('.layouteditor');
     _unbindScreenNavigation();
 

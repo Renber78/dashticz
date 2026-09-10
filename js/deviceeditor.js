@@ -128,6 +128,8 @@ var DashticzDeviceEditor = (function () {
   var gridPositions = {}; // order key -> {x,y,w,h}
   var gridRefs = {}; // order key -> block reference
   var gridExtras = []; // non-device/widget blocks
+  var DEFAULT_GRID_WIDTH = 6;
+  var DEFAULT_GRID_HEIGHT = 6;
   var TITLE_GRID_HEIGHT = 2;
   var SEPARATOR_DEFAULT_ICON = 'fas fa-divide';
   var customImageListPromise = null;
@@ -208,6 +210,8 @@ var DashticzDeviceEditor = (function () {
         invalid_slide_target: 'Enter a valid positive screen number.',
         custom_device_name: 'Device name',
         custom_device_name_help: 'Used as the blocks[...] key in CONFIG.js.',
+        custom_device_idx_help:
+          "Domoticz device idx, or 'v<idx>' for a Domoticz variable (e.g. v3).",
         custom_device_title: 'Title',
         custom_device_options: 'Device options',
         custom_device_values_help: 'For arrays or objects, enter valid JSON.',
@@ -797,6 +801,19 @@ var DashticzDeviceEditor = (function () {
     return 'device_' + parsed.idx + (parsed.subidx ? '_' + parsed.subidx : '');
   }
 
+  /* A Custom device's idx is normally a plain positive Domoticz device id,
+     but js/components/domoticzblock.js (via DT_function.getDomoticzIdx()) and
+     js/domoticz-api.js's _setAllVariables() also resolve a 'v<idx>' string to
+     a Domoticz user variable (documented in docs/blocks/domoticzblocks.rst).
+     Recognising that shape here lets the Custom Device popup create/edit
+     variable-backed blocks instead of only plain devices. */
+  function _isCustomVariableIdx(idx) {
+    return typeof idx === 'string' && /^[vV][1-9][0-9]*$/.test(idx);
+  }
+  function _normalizeCustomVariableIdx(idx) {
+    return 'v' + idx.slice(1);
+  }
+
   /* Recognise editor-created dummy and title blocks without treating every
      hand-written block with hide_data as a dummy device. */
   function _specialFromReference(reference) {
@@ -830,7 +847,7 @@ var DashticzDeviceEditor = (function () {
         definition.type === 'dial' ||
         definition.type === 'bar' ||
         definition.type === reference) &&
-      parseInt(definition.idx, 10) > 0
+      (parseInt(definition.idx, 10) > 0 || _isCustomVariableIdx(definition.idx))
     ) {
       // A device with a hand-picked block key is a Custom device. Recognising
       // it before the normal IDX path preserves that key on later editor saves.
@@ -1026,7 +1043,9 @@ var DashticzDeviceEditor = (function () {
             ? parseInt(definition.idx, 10) > 0
               ? parseInt(definition.idx, 10)
               : null
-            : parseInt(definition.idx, 10),
+            : kind === 'custom' && _isCustomVariableIdx(definition.idx)
+              ? _normalizeCustomVariableIdx(definition.idx)
+              : parseInt(definition.idx, 10),
       title:
         TITLE_OPTIONAL_SPECIAL_KINDS.indexOf(kind) > -1
           ? String(definition.title || '')
@@ -2448,7 +2467,12 @@ var DashticzDeviceEditor = (function () {
     html +=
       '<div class="mb-3"><label class="form-label" for="cd-device-idx">IDX</label>';
     html +=
-      '<input type="number" min="1" step="1" class="form-control" id="cd-device-idx"></div>';
+      '<input type="text" inputmode="numeric" class="form-control" ' +
+      'id="cd-device-idx" placeholder="123, or v3 for a variable">';
+    html +=
+      '<div class="form-text">' +
+      _esc(t.custom_device_idx_help) +
+      '</div></div>';
     html +=
       '<div class="mb-3"><label class="form-label" for="cd-device-title">' +
       _esc(t.custom_device_title) +
@@ -2513,7 +2537,10 @@ var DashticzDeviceEditor = (function () {
         .text('');
       var reference = $.trim(String($('#cd-device-name').val() || ''));
       var rawIdx = $.trim(String($('#cd-device-idx').val() || ''));
-      var idx = parseInt(rawIdx, 10);
+      var isVariableIdx = _isCustomVariableIdx(rawIdx);
+      var idx = isVariableIdx
+        ? _normalizeCustomVariableIdx(rawIdx)
+        : parseInt(rawIdx, 10);
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
         $message.addClass('text-danger').text(t.invalid_custom_device_name);
         $('#cd-device-name').trigger('focus');
@@ -2527,7 +2554,7 @@ var DashticzDeviceEditor = (function () {
         $('#cd-device-name').trigger('focus');
         return;
       }
-      if (!(idx > 0 && String(idx) === rawIdx)) {
+      if (!isVariableIdx && !(idx > 0 && String(idx) === rawIdx)) {
         $message.addClass('text-danger').text(t.invalid_idx);
         $('#cd-device-idx').trigger('focus');
         return;
@@ -3786,14 +3813,12 @@ var DashticzDeviceEditor = (function () {
         definition: {},
         idx: null,
         title: title || lms.playerLabel || '',
+        // width/height are classic-layout values. Grid placement uses its own
+        // cell counts so 5x8 is not rescaled by gridColumns or treated as px.
         width: 6,
-        // A block's `height` means two different things depending on mode
-        // (js/dashticz.js's renderBlock(): grid-row count in grid mode vs.
-        // a literal CSS pixel height outside it), so a fixed default is
-        // only meaningful in grid mode - the only mode this popup is
-        // actually reachable from (the Widgets catalog is grid-only).
-        // 8 rows comfortably fits the 100px cover plus its info lines.
-        height: gridMode ? 8 : null,
+        height: null,
+        gridWidth: 5,
+        gridHeight: 8,
         showTitle: quickOptions.showTitle,
         options: {
           icon: quickOptions.icon,
@@ -6579,7 +6604,8 @@ var DashticzDeviceEditor = (function () {
         _esc(t.multi_device_idx) +
         '</label>';
       html +=
-        '<input type="number" min="1" step="1" class="form-control" id="de-config-idx" value="' +
+        '<input type="text" inputmode="numeric" class="form-control" ' +
+        'id="de-config-idx" placeholder="123, or v3 for a variable" value="' +
         _esc(special.idx || '') +
         '">';
       html +=
@@ -6890,16 +6916,20 @@ var DashticzDeviceEditor = (function () {
       var pendingIdx = isCustom || isGroupBlock ? special.idx : null;
       if (isCustom) {
         var rawIdx = $.trim(String($('#de-config-idx').val() || ''));
-        var parsedIdx = parseInt(rawIdx, 10);
-        if (!(parsedIdx > 0 && String(parsedIdx) === rawIdx)) {
-          valid = false;
-          $popup
-            .find('.de-config-message')
-            .addClass('text-danger')
-            .text(t.invalid_idx);
-          $('#de-config-idx').trigger('focus');
+        if (_isCustomVariableIdx(rawIdx)) {
+          pendingIdx = _normalizeCustomVariableIdx(rawIdx);
         } else {
-          pendingIdx = parsedIdx;
+          var parsedIdx = parseInt(rawIdx, 10);
+          if (!(parsedIdx > 0 && String(parsedIdx) === rawIdx)) {
+            valid = false;
+            $popup
+              .find('.de-config-message')
+              .addClass('text-danger')
+              .text(t.invalid_idx);
+            $('#de-config-idx').trigger('focus');
+          } else {
+            pendingIdx = parsedIdx;
+          }
         }
       } else if (isGroupBlock) {
         // Unlike Custom/Multi Device, a Group's idx is optional - it can
@@ -8657,25 +8687,53 @@ var DashticzDeviceEditor = (function () {
                 if (!position) {
                   var width12 = _widthForOrderKey(orderKey);
                   var pixelHeight = _heightForOrderKey(orderKey);
-                  var width = Math.max(
-                    1,
-                    Math.min(
-                      gridConfig.gridColumns,
-                      Math.round((width12 * gridConfig.gridColumns) / 12)
-                    )
+                  var pendingSpecial =
+                    orderKey.indexOf('special:') === 0
+                      ? managedSpecials[orderKey]
+                      : null;
+                  var requestedGridWidth = parseInt(
+                    pendingSpecial && pendingSpecial.gridWidth,
+                    10
+                  );
+                  var requestedGridHeight = parseInt(
+                    pendingSpecial && pendingSpecial.gridHeight,
+                    10
                   );
                   var isTitleBlock =
-                    orderKey.indexOf('special:') === 0 &&
-                    managedSpecials[orderKey].specialType === 'title';
-                  var height = isTitleBlock
-                    ? TITLE_GRID_HEIGHT
-                    : Math.max(
-                        1,
-                        Math.ceil(
-                          ((pixelHeight || 120) + gridConfig.gap) /
-                            (gridConfig.rowHeight + gridConfig.gap)
+                    pendingSpecial && pendingSpecial.specialType === 'title';
+                  var width =
+                    requestedGridWidth > 0
+                      ? Math.max(
+                          1,
+                          Math.min(gridConfig.gridColumns, requestedGridWidth)
                         )
-                      );
+                      : isTitleBlock
+                        ? gridConfig.gridColumns
+                        : pendingSpecial
+                          ? Math.min(gridConfig.gridColumns, DEFAULT_GRID_WIDTH)
+                          : Math.max(
+                              1,
+                              Math.min(
+                                gridConfig.gridColumns,
+                                Math.round(
+                                  (width12 * gridConfig.gridColumns) / 12
+                                )
+                              )
+                            );
+                  var height =
+                    requestedGridHeight > 0
+                      ? requestedGridHeight
+                      : isTitleBlock
+                        ? TITLE_GRID_HEIGHT
+                        : pendingSpecial
+                          ? DEFAULT_GRID_HEIGHT
+                          : Math.max(
+                              1,
+                              Math.ceil(
+                                ((pixelHeight || 120) + gridConfig.gap) /
+                                  (gridConfig.rowHeight + gridConfig.gap)
+                              )
+                            );
                   position = _firstFreeGridPosition(occupied, width, height);
                   occupied.push(position);
                 }

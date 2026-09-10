@@ -633,14 +633,27 @@ test('first-run access check verifies CONFIG.js as the web server user', () => {
 
 test('Apache write-access installer derives the path and verifies a real write', () => {
   const installer = read('tools/install-dashticz-write-access.sh');
+  const mainInstaller = read('install.sh');
 
   assert.match(installer, /INSTALL_DIR=.*SCRIPT_DIR\/\.\./);
   assert.match(installer, /js\/savesettings\.php/);
   assert.match(installer, /chmod 2775/);
   assert.match(installer, /runuser -u .* touch/);
+  assert.match(installer, /Refusing --git-update/);
+  assert.doesNotMatch(installer, /chown -R/);
+  assert.doesNotMatch(mainInstaller, /--git-update/);
   assert.doesNotMatch(installer, /sudoers/);
   assert.doesNotMatch(installer, /NOPASSWD/);
   assert.doesNotMatch(installer, /\/var\/www\/html/);
+});
+
+test('Git permission hint does not recommend exposing the checkout', () => {
+  const source = read('js/update.php');
+
+  assert.match(source, /application code and \.git should not be writable/);
+  assert.match(source, /\.\/update\.sh/);
+  assert.doesNotMatch(source, /sudo chown -R/);
+  assert.doesNotMatch(source, /install-dashticz-write-access\.sh --git-update/);
 });
 
 test('bundled Horizon remote requires POST, CSRF and a key allowlist', () => {
@@ -825,13 +838,21 @@ test('layout writer stores safe references in one grouped dashboard section', ()
   assert.match(source, /configwriter_extract_wrapped_section/);
   assert.match(source, /configwriter_remove_editor_sections/);
   assert.match(source, /configwriter_upsert_root_config_settings/);
+  // configwriter_upsert_root_config_settings() must run AFTER the temporary
+  // editor sections are removed, in both the standby (screen 0) and normal
+  // screen branches - not before. It prefers to rewrite an existing simple
+  // `config['key'] = value;` line in place rather than appending a new one;
+  // if the widget-editor section still existed at that point, the in-place
+  // match would find the old line still sitting inside it, so the
+  // "preserved" value would be deleted right along with the whole section a
+  // moment later instead of actually being preserved (discussion #271).
   assert.match(
     source,
-    /configwriter_upsert_root_config_settings\([\s\S]*?if \(\$screenNumber === 0\)/
+    /configwriter_remove_editor_sections\(\$config, 0\)[\s\S]*?configwriter_upsert_root_config_settings/
   );
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /if \(\$screenNumber === 1\)\s*\{[\s\S]*?configwriter_upsert_root_config_settings/
+    /configwriter_remove_editor_sections\(\$config, \$screenNumber\)[\s\S]*?configwriter_upsert_root_config_settings/
   );
   assert.match(source, /configwriter_build_layout_section/);
   assert.match(source, /configwriter_parse_screen_number/);
