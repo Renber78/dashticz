@@ -24,10 +24,11 @@ The following config settings are applicable:
     - Description
   * - calendarformat
     - | Configure the Calendar Date/Time format.
-      | ``'dd DD.MM HH:mm'`` = default
+      | ``'dd DD-MM HH:mm'`` = default
   * - calendarlanguage
-    - | Controls the calendar locale
-      | ``'nl'`` , ``'en'`` , ``'hu'``, etc.
+    - | Controls the calendar locale, e.g. for the weekday and month names.
+      | ``'nl'`` , ``'nl_NL'``, ``'en'`` , ``'hu'``, etc.
+      | Default: the value of ``language``. Also available in the Settings menu (Localize).
 
 Usage
 -----

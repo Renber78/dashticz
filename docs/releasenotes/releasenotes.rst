@@ -1,6 +1,479 @@
 Release Notes
 =============
 
+v4.20.2 (16-10-2026)
+----------------------
+
+* **Fixes**
+
+- Garbage: the HVC option uses the new host ``inzamelkalender.hvcgroep.nl``,
+  because ``apps.hvcgroep.nl`` no longer resolves (#1352).
+- Calendar: an event that repeats on the last weekday of the month (for
+  example ``BYDAY=-1FR``) shows the last one instead of the second-to-last
+  one in months with five of that weekday (#1353).
+
+v4.20.1 (11-10-2026)
+----------------------
+
+* **Enhancements**
+
+- The version number is shown in the top bar, behind the app title.
+- Config menu: the General and Display settings are laid out in two columns,
+  with narrower fields and the info icon before the field.
+- Device Config: the new **Reverse** display option swaps which state dims the
+  icon or image of a tile. By default the icon is dimmed when the device is
+  Off; with Reverse (``reverseicon: true``) it is dimmed when On instead.
+
+v4.20.0 (11-10-2026)
+----------------------
+
+* **Fixes**
+
+- Layout Editor (classic screens): moving or resizing a tile keeps the icon,
+  title and custom fields of its block, and a new separator can be saved.
+- Layout Editor: a block with a hand-picked key and a device idx is treated as
+  a Custom device, as in the Device Editor.
+- Editors: a key with a trailing newline is refused, a title is no longer cut
+  in the middle of a character, the LMS settings cannot be overwritten by a
+  custom field, and an empty text value of a custom field no longer blocks the
+  popup.
+- Widget Editor: a block with ``last_update: false`` keeps it when the Widget
+  Editor saves, and ``hide_data`` set to ``1`` is read as on.
+- Layout Editor (grid): an inline block with an invalid ``htmlfile`` or
+  ``frameurl`` is refused, like in the Device Editor.
+- CONFIG.js: a number that is not finite (``INF``, ``NaN``) is left out
+  instead of breaking the file.
+- Device Rules: the custom folder cannot be a program folder, and an
+  unchanged CSS file is left alone.
+- Fully Kiosk widget: the label of every switch is shown right next to the
+  switch, and the switches are laid out in 3 columns (2 columns on a narrow
+  screen, 1 on a phone).
+- Fully Kiosk settings: the label of every switch is shown right next to the
+  switch, and the fields are laid out in 3 columns (2 on a narrow popup, 1 on
+  a phone).
+- Fully Kiosk settings: the font size field is now in the Display options,
+  below the icons.
+- The font size field of the F1, TVgids, Weather Info, HP iLO and PostNL
+  widgets is now in the Display options below the icons, switches in the
+  Widget Config show their label next to the switch, and the Selector Switch
+  compact option shows the icon per level in two columns.
+- Info in Config no longer shows ``undefined`` after the version number, and
+  the update check falls back to the ``master`` branch when ``version.txt``
+  does not name a branch.
+- Widget Editor: only the first block of a kind (iframe, camera, ...) is
+  managed as a widget, so a screen with several of them can be saved again.
+- Widget Editor: an empty number setting is no longer written as ``0`` (a map
+  with zoom level 0 showed the whole world).
+- Layout Editor: no config icon for a special block whose key the Device
+  Editor cannot open.
+- A setting with a ``;`` in its text (a password, for example) is no longer
+  cut off when CONFIG.js is rewritten.
+- Saving a grid screen without tiles empties the screen instead of deleting
+  it and renumbering the later screens.
+- A text value of a custom field that looks like a number or ``true``
+  (``007``) stays a string in the Device and Widget Editor.
+- The garbage, cors and nocache bridges check the origin of a request; the
+  moon phase calculation and its quarter functions work again; the graph
+  header expression only takes numeric values.
+- The Coins block uses the CoinGecko API (the CoinMarketCap v1 and LiteBit
+  endpoints are gone); ``key`` is the CoinGecko coin id.
+
+- Device Editor, review of ``deviceeditor.js``: a block that was saved before
+  can be edited again on a classic screen, the same device on two classic
+  screens keeps its own block per screen, and the width and height of a
+  device are read from the screen being edited.
+- Device Editor: the height of the iFrame, Timegraph and Camera quick-add
+  popups no longer makes the whole save fail, and the iFrame scrollbars and
+  Camera cache switches can be switched off.
+- Device Editor: a Timegraph (or another ``widget_*`` block with an idx) stays a
+  widget, the topbar and the standby columns are no longer read twice, blocks
+  that the editor does not manage are kept on classic and grid screens, and a
+  device with its own key is not added a second time on standby.
+- Device Editor: the fields ``refresh``, ``server``, ``port``, ``username``,
+  ``password`` and ``player`` are only reserved on a Lyrion Music Server
+  block, so an iFrame, XMLTV or Camera block keeps its ``refresh``. The
+  Lyrion refresh interval and text style are no longer replaced by defaults,
+  and a pasted ``:port`` goes to the port field.
+- Device Editor: a Calendar with named sources keeps its names and colours,
+  accepts numeric names and ``webcal://`` sources and shows the same limits as
+  the server; a legacy ``calendars`` widget no longer blocks the save. Graph
+  legend, graph type and group by, the F1 UTC offset (half hours) and
+  switches written as ``1`` keep their value.
+- Device Editor: a Multi Device row keeps its other properties and its
+  ``v``, ``s`` and ``12_1`` idx forms, the slide button target is checked,
+  the Updated switch is not offered where it has no effect, and the Icon
+  switch of a slide button without icon reads as off.
+- Device Editor: a second click on Save in a quick-add popup, or on the
+  cogwheel, no longer adds a block or a popup twice; a failed save of a
+  Layout Editor cogwheel change is rolled back; a save that only half
+  succeeded says so; and adding a device while the Layout Editor is open no
+  longer loses edits made in the same session.
+- Layout Editor cogwheel: the change is written under the key the block
+  already has instead of ``device_<idx>``.
+- Saving a block with a ``$`` in its key is refused before anything is
+  written, and a Calendar widget accepts numeric names and ``webcal://``.
+
+* **Code**
+
+- ics-parser 3.6.0 and PHP 8.1+ deprecation fixes in the iCal bridge.
+- New tests for the iCal and garbage bridges, the moon phase, the thermostat
+  block, the editors and the language files.
+
+v4.1.7 (10-10-2026)
+----------------------
+
+* **Code**
+
+- Dependency updates: swiper 14.3.0, ``@babel/core`` and
+  ``@babel/preset-env`` 8.0.7, ``@types/node`` 26.6.4, sass 1.105.1,
+  johngrogg/ics-parser 3.6.0 (lock file) and newer versions of the GitHub
+  Actions used in the CI workflow.
+
+v4.1.6 (7-10-2026)
+----------------------
+
+* **Fixes**
+
+- Weather Info now gets all its data from one source, Buienradar: the current
+  weather (temperature, description, icon and wind) comes from the nearest
+  Buienradar weather station instead of Open-Meteo, so it no longer
+  contradicts the rain radar. A value the nearest station does not measure
+  comes from the next nearest one; within 75 km.
+- The Weather Info icon and description follow the rain status: while
+  Buienradar reports rain right now and the station still reports a dry sky
+  (clear, cloudy or fog), the icon becomes a rain cloud and the description
+  light rain, rain or heavy rain by intensity. Snow and thunderstorm are kept.
+
+* **Code**
+
+- ``_DASHTICZ_VERSION`` raised to 203.
+
+v4.1.5 (6-10-2026)
+----------------------
+
+* **Enhancements**
+
+- New Weather Info widget (Widgets menu, multiple per screen), based on the
+  domoticz_weatherinfo plugin: the Buienradar rain forecast (raining now, rain
+  expected, rain expected at a time or dry for now) and the current weather of
+  Open-Meteo (temperature, description, wind and a weather icon). The options
+  of the plugin are settings of the widget: the location (empty = the location
+  of Domoticz), the poll interval, the language (Dutch or English) and the
+  parts of the text (each shown or hidden, in the order you drag them). An extra row can show the current rain intensity in
+  mm/h, and the weather icons are animated (or the plugin's emoji). Both feeds are read through the new bridge
+  ``vendor/dashticz/weatherinfo/index.php``.
+
+* **Code**
+
+- ``_DASHTICZ_VERSION`` raised to 202.
+
+v4.1.4 (5-10-2026)
+----------------------
+
+* **Enhancements**
+
+- Traffic and Traffic info fetch the RWS feed through a new cached bridge
+  (``vendor/dashticz/rws/index.php``) when PHP is the CORS proxy, so several
+  widgets share one download.
+- Traffic info shows an error message when the feed cannot be loaded.
+- New Fully Kiosk widget (Widgets menu, multiple per screen), based on the
+  domoticz_fullykiosk plugin: the battery percentage of a tablet, the
+  percentage at which its charger is switched next and a switch for the
+  charger. Optional automatic charge control with random start and stop
+  percentages, a hard minimum and maximum and a 16 hour backup; the battery is
+  read through the new bridge ``vendor/dashticz/fullykiosk/index.php``. The
+  other devices of the plugin (charging state, screen, screensaver, motion sensor, brightness
+  and load start URL) can be added as extra rows (the battery row can be hidden), each with its own switch in
+  the settings.
+
+* **Fixes**
+
+- F1 times follow the browser time zone, unless ``f1utcoffset`` is set.
+- The F1, TVgids, PostNL and HP iLO widgets no longer fetch twice when they
+  are mounted.
+- PostNL escapes the error message returned by the server.
+- The F1, HP iLO and PostNL caches are written atomically; the TVgids and F1
+  bridges keep serving stale data when the source is down.
+- The PostNL, HP iLO and TVgids status colours, and the F1 and TVgids lists on
+  grid screens, now follow the shared ``--dt-ok/info/warn/error`` tokens and
+  one list-widget layout rule.
+
+* **Code**
+
+- New helpers ``DT_function.escapeHtml``, ``t``, ``clampNumber``, ``bridge``
+  and ``bridgeError``, and ``dashticz_cached_json()`` in
+  ``vendor/dashticz/security.php``.
+- New widget manifest ``js/widgets.json``, read by the Device Editor, the
+  Layout Editor and ``saveblocks.php``.
+- The F1 and TVgids sections of the Device Editor use shared settings-table
+  functions.
+- The unused ``radars`` option of Traffic info is removed.
+- ``_DASHTICZ_VERSION`` raised to 194.
+- Faster Playwright CI jobs: 4 parallel workers against a PHP test server with
+  4 workers (``PHP_CLI_SERVER_WORKERS``), the browser jobs no longer wait for
+  the quality job, the downloaded browsers are cached, and
+  ``tests/domoticzblock.spec.js`` waits for the loader instead of a fixed
+  second.
+
+v4.1.3 (1-10-2026)
+----------------------
+
+* **Enhancements**
+
+- Traffic info can show selected roads as well as everything within a
+  distance (#1321). ``filter: 'roads'`` shows only the roads in ``road``, for
+  example ``'A4, A17'``, in that order and with at most ``results``
+  announcements per road; ``showemptyroads`` also lists a road without
+  announcements. Everything can be set in the Traffic information Widget
+  Config.
+
+* **Fixes**
+
+- Traffic info: a dash inside a place name (``'s-Hertogenbosch``) no longer
+  splits the direction text, and a delay or length of 0 is no longer shown.
+- The server-side caches of the F1, HP iLO and PostNL widgets were written to
+  ``vendor/custom/cache`` instead of ``custom/cache``, where git did not
+  ignore them and a browser could download them. They are now written to
+  ``custom/cache``, and the misplaced files are removed.
+- ``custom/cache`` is closed to browsers: Dashticz writes a deny-all
+  ``.htaccess`` there (Apache), and the Docker nginx configuration blocks
+  ``/custom/cache/`` and ``/vendor/custom/``.
+- The name of the PostNL cache file, which holds a refresh token, can no
+  longer be derived from the e-mail address.
+
+* **Code**
+
+- New ``dashticz_cache_dir()`` in ``vendor/dashticz/security.php``, used by
+  the F1, HP iLO, PostNL and XMLTV proxies.
+- The F1 section of the Device Editor (``js/deviceeditor.js``) is built from
+  one settings table instead of separate functions per field; the fields and
+  the saved block are unchanged.
+- ``_DASHTICZ_VERSION`` raised to 192.
+
+v4.1.2 (29-9-2026)
+----------------------
+
+* **Enhancements**
+
+- The calendar language now follows the general language setting. Previously
+  ``calendarlanguage`` defaulted to ``en_US``, so weekdays and months in the
+  Calendar block stayed English when ``language`` was set to, for example,
+  ``nl_NL`` (#1315). ``calendarlanguage`` now defaults to the value of
+  ``language``; an explicitly configured ``calendarlanguage`` still takes
+  precedence.
+- The default ``calendarformat`` is now ``dd DD-MM HH:mm`` (was
+  ``dd DD.MM HH:mm``), so dates show as 29-09 instead of 29.09. A configured
+  ``calendarformat`` is not affected.
+- The calendar format and language are back in the Settings menu (Localize).
+  They stay in sync with the Calendar Widget Config: both edit
+  ``calendarformat`` and ``calendarlanguage``.
+- Adding a calendar with **Add items > Calendar** now writes ``calendarformat``
+  and ``calendarlanguage`` to the config, as Dashticz 3 did.
+
+* **Code**
+
+- ``js/settings.js`` falls back to ``settings['language']`` when
+  ``calendarlanguage`` is not configured.
+- ``js/savewidgets.php`` also saves settings when no widgets are submitted and
+  keeps the saved settings that are not part of the request.
+
+v4.1.1 (27-9-2026)
+----------------------
+
+* **Fixes**
+
+- A sub-device that the grid Device Editor stored under a named key, for
+  example the current usage of a P1 Smart Meter as
+  ``blocks['Stroom_1'] = {idx: '274_1', ...}``, lost its sub-index on the next
+  save of that screen: ``idx`` became ``274`` and the tile showed every value
+  of the meter instead of the one sub-device (#1309). The ``<idx>_<subidx>``
+  form is now kept. A block that already lost its sub-index can be corrected
+  by entering, for example, ``274_1`` in the **IDX** field of its Device
+  Config.
+- An action in a popup that was still opening got lost. Bootstrap ignores
+  closing a popup during its fade-in, so an early click on OK, Save or Back, a
+  tile picked in the Add items menu, or Continue in the mode-switch warning
+  applied its action but left the popup open, and what should follow (for
+  example Device Config opening from the Device Editor) never happened. These
+  popups now close as soon as they have finished opening. Cancel, the close
+  button, Escape and clicks on the background behave as before.
+
+* **Code**
+
+- Custom devices accept an ``<idx>_<subidx>`` idx in ``js/deviceeditor.js``,
+  ``js/saveblocks.php`` and ``js/configwriter.php``; live lookups (default
+  icon, Dial/Bar support) keep using the base device.
+- New ``_hideModal()`` helper in ``js/deviceeditor.js``,
+  ``js/widgeteditor.js`` and ``js/components/simpleblock.js`` for popups that
+  close after their own actions. This also fixes the intermittent Playwright
+  failure of "Calendar Widget Config reloads a legacy single icalurl safely".
+- ``_DASHTICZ_VERSION`` (and ``bundle.css?v=``) raised to 191, so browsers
+  load the fixed editor scripts instead of a cached copy.
+
+v4.1.0 (27-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Rewrote the documentation for Dashticz 4. New pages: **First start** (the
+  setup wizard, the write-access check and the Wizard/Custom mode picker), a
+  **Wizard mode** section (the topbar, the Screen/Layout Editor and screens,
+  the Add items menu, the Device Editor and every Device Config option,
+  widgets and Widget Config, the special blocks and Automation) with
+  screenshots, and **The Settings menu**. The introduction, installation,
+  configuration, screens, columns and troubleshooting pages were updated for
+  Dashticz 4, the hand-written configuration guide is now the Custom mode
+  guide, and the configuration reference lists ``config_mode``,
+  ``client_id``/``client_secret``, ``theme``, ``background_image``,
+  ``gridColumns``, ``rowHeight`` and ``topbar_use_png_icons``.
+- Widget Config and Device Config (merged in #313, after the 4.0.13 notes):
+  every Widget Config uses the same section order (Display options, Settings,
+  Custom fields) and one shared two-column layout, including the repeatable
+  Calendar/Camera/Radio/Timegraph entries. Fields, headings, buttons and
+  controls have one uniform spacing, height and style; add buttons are green
+  and labelled, numeric fields use number inputs, and the LMS, PostNL and
+  Garbage settings use compact layouts. The Dutch translation is complete and
+  the French translation was added for all editor, widget and status texts.
+
+* **Fixes**
+
+- The confirmation shown when switching from Custom to Wizard mode said that
+  all blocks, columns and screens are removed from ``CONFIG.js``. Only the
+  screen that is shown is converted to a grid layout; the text now says so
+  and suggests making a copy of ``CONFIG.js`` first.
+- A plain device that the grid Device Editor stored under a named key showed
+  the Multi Device **Main IDX** label and its value-row help in Device Config.
+  It now shows **IDX** with the device/variable help; a real Multi Device keeps
+  **Main IDX**.
+- The bolt icon in the Automation heading and the remove (trash) button of an
+  automation rule were shown at the global 30px icon size; they are
+  text-sized again.
+- Stylesheets and the LMS/Garbage config helpers are cache-busted on every
+  page load (merged in #313), so browsers no longer keep an outdated copy
+  after an update.
+
+v4.0.13 (26-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Added a **Text** section to the Device Config of Domoticz devices and
+  idx-backed Custom devices (widgets are not affected). Per block you can set
+  the **title size** and the **value size** in pixels (6-100) and the text
+  **alignment** (Theme default, left, center or right). By default a block
+  keeps the font sizes and alignment of the selected theme, or of the base
+  style (``css/creative.css``) when no theme is selected; a value set here
+  overrides that theme/base setting for this block only. Leaving a size empty
+  or choosing Theme default falls back to the theme again. The settings are
+  stored in ``CONFIG.js`` as ``fontsize_title``, ``fontsize_value`` and
+  ``textalign`` and applied by ``applyBlockTextStyle()`` in ``js/blocks.js``;
+  the last-update text keeps its own theme size.
+
+v4.0.12 (21-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Added the **F1** widget (Widgets menu, in the "multiple per screen"
+  section), based on the `domoticz_F1 <https://github.com/MadPatrick/domoticz_F1>`_
+  plugin. It downloads the F1 calendar itself through the same-origin PHP
+  bridge ``vendor/dashticz/f1/index.php``, so no Domoticz device is needed.
+  Choose per tile with two icon buttons what it shows: the **next session**,
+  or **all sessions** of the race weekend (with the race location added to
+  the tile title). Options per tile: language, calendar URL per language
+  (defaults to the plugin's feeds), UTC offset, poll interval, session filter,
+  next-event visibility in days, no-event text, ``hideimageonempty``, an
+  optional image before the Next event text and a font size that works like
+  the one of the cluster widget. The F1 settings are shown below the
+  Title/Icon fields in the Device Config, in two columns. See
+  :ref:`f1 <f1>`.
+
+* **Fixes**
+
+- The version is bumped so browsers no longer serve cached editor scripts
+  (``deviceeditor.js``, ``widgeteditor.js`` and others are loaded as
+  ``file.js?v=<version>``): a stale copy could make saving a second F1 widget
+  fail without an error message.
+- Saving a second F1 widget no longer drops an early singleton F1 block
+  (``type: 'f1'``/``'f1events'``) from the screen: it is kept and converted to
+  the per-block F1 settings on the next save.
+
+v4.0.11 (20-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Added a **Compact** option to the Device Config of Selector Switches
+  (buttons style) with exactly three levels. The block keeps its icon and
+  title where every other block has them; the three level buttons (for
+  example Open/Half/Dicht) become small icon buttons (chevron up, minus,
+  chevron down) below the title. The buttons scale with the block height
+  (Layout Editor / configured height), and the level names stay available as
+  tooltip and accessible name. The option is stored as ``compactSelector`` in
+  ``CONFIG.js`` and is styled in the Modern Dark theme.
+
+v4.0.10 (20-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Added the HP iLO widget (Widgets menu): clustered HPE server info read
+  from the iLO Redfish API through the same-origin PHP bridge
+  ``vendor/dashticz/hpilo/index.php``, based on the domoticz_HP_ilo plugin.
+  The rows (server name, model, power, health, uptime as days/hours/minutes,
+  fan speed, CPU and inlet temperature, power usage, storage health, SSD
+  lifetime, iLO firmware, network, serial number, minimum fan speed, thermal
+  configuration and power regulator) are picked and drag-reordered in the
+  widget config. iLO host, port, credentials, poll interval and font size are
+  widget settings.
+- The Widgets menu cards are now sorted alphabetically.
+- The Widgets menu now shows four cards per row (slightly smaller cards,
+  same menu width).
+
+v4.0.9 (14-9-2026)
+----------------------
+
+* **Fixes**
+
+- Fixed the plain Thermostat/Setpoint block's plus/minus buttons silently
+  doing nothing (issue #1292): the v4.0.0 typography stabilization
+  renamed the block's value span from ``class="state"`` to
+  ``class="value"`` in ``tpl/thermostat_block.tpl``, but
+  ``js/tempcontrol.js``'s click handler still looked up the old
+  ``.state`` class, so it always read an empty selection, never parsed a
+  valid current value, and never sent the ``setsetpoint`` command.
+  Updated the selector to ``.value`` to match the current template.
+
+v4.0.8 (13-9-2026)
+----------------------
+
+* **Fixes**
+
+- Modern Dark: reverted block backgrounds (``--main-bg``) back to a flat
+  color, undoing an earlier gradient experiment for this theme
+  specifically. Liquid Glass Blue and Liquid Glass Grey are unaffected.
+
+v4.0.7 (12-9-2026)
+----------------------
+
+* **Enhancements**
+
+- Blinds/Dimmer slider: the up/down/stop action buttons and their icons
+  (32px/12px), and the percentage scale labels beside the track (12px,
+  16px for the tick bold-highlighting the current value), are now bigger
+  touch targets - 38px/14px and 14px/16px respectively - on the Modern
+  Dark, Liquid Glass Blue and Liquid Glass Grey themes.
+
+* **Code**
+
+- Redesigned the slider's drag handle in ``css/creative.css`` itself (so
+  it applies to every theme, and to both the Blinds and Dimmer variants
+  that share this component): previously a small 16px round dot in a
+  light grey fill, it's now a rounded rectangle spanning the full width
+  of the track (16px tall, 6px corner radius, a softened white border),
+  filled with a dark green pulled from the same palette as the track's
+  own fill gradient.
+
 v4.0.6 (10-9-2026)
 ----------------------
 

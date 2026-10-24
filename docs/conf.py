@@ -12,7 +12,8 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import json
+import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
@@ -20,13 +21,17 @@
 # -- Project information -----------------------------------------------------
 
 project = 'Dashticz'
-copyright = '2020, Dashticz'
+copyright = '2020-2026, Dashticz'
 author = 'Dashticz'
 
+# Read the version from version.txt, the file that release bookkeeping already
+# updates, so the published docs never show a stale version.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                       'version.txt'), encoding='utf-8') as version_file:
+    # The full version, including alpha/beta/rc tags
+    release = json.load(version_file)['version']
 # The short X.Y version
-version = ''
-# The full version, including alpha/beta/rc tags
-release = 'beta'
+version = '.'.join(release.split('.')[:2])
 
 
 # -- General configuration ---------------------------------------------------

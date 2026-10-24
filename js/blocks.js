@@ -175,6 +175,45 @@ function getCustomFunction(functionname, block, afterupdate) {
   }
 }
 
+/* Device Config -> Text: per-block title/value font size (px) and text
+   alignment, saved as fontsize_title/fontsize_value/textalign. The sizes are
+   passed as CSS variables; css/creative.css's .dt-fs-title/.dt-fs-value/
+   .dt-align-* rules apply them over the theme's own (!important) sizes. */
+function applyBlockTextStyle($div, block) {
+  var titleSize = parseInt(block.fontsize_title, 10);
+  var valueSize = parseInt(block.fontsize_value, 10);
+  var align = String(block.textalign || '').toLowerCase();
+  var valign = String(block.textvalign || '').toLowerCase();
+  $div.each(function () {
+    this.style.setProperty(
+      '--dt-fs-title',
+      titleSize > 0 ? titleSize + 'px' : ''
+    );
+    this.style.setProperty(
+      '--dt-fs-value',
+      valueSize > 0 ? valueSize + 'px' : ''
+    );
+  });
+  $div
+    .toggleClass('dt-fs-title', titleSize > 0)
+    .toggleClass('dt-fs-value', valueSize > 0)
+    .removeClass(
+      'dt-align-left dt-align-center dt-align-right dt-valign-top dt-valign-middle dt-valign-bottom'
+    );
+  if (['left', 'center', 'right'].indexOf(align) > -1) {
+    $div.addClass('dt-align-' + align);
+  }
+  if (['top', 'middle', 'bottom'].indexOf(valign) > -1) {
+    $div.addClass('dt-valign-' + valign);
+  }
+}
+
+/* Device Config -> Reverse (block.reverseicon): swaps which state dims the
+   icon/image. css/creative.css's .dt-icon-reverse rules do the work. */
+function applyBlockIconStyle($div, block) {
+  $div.toggleClass('dt-icon-reverse', block.reverseicon === true);
+}
+
 // eslint-disable-next-line no-unused-vars
 function deviceUpdateHandler(block) {
   var selector = block.mountPoint;
@@ -323,6 +362,8 @@ function deviceUpdateHandler(block) {
   if (device.HaveTimeout) $div.addClass('timeout');
   else $div.removeClass('timeout');
 
+  applyBlockTextStyle($div, block);
+  applyBlockIconStyle($div, block);
   addBatteryLevel($div, block);
   addAutomationIndicator($div, block);
   triggerStatus(block); //moved the second call to the end to assure that the block has been created in the DOM completely
@@ -1060,6 +1101,85 @@ function handleDevice(block) {
   createBlocks(block);
 }
 
+/*exported postHookLux */
+var LUX_SLIDER_MAX = 2500;
+// Lux value that is treated as 1 lux step in the logarithmic curve; a larger
+// value keeps low lux values closer to the start of the arc
+var LUX_SLIDER_KNEE = 10;
+
+/**
+ * Appends a read-only sun arc to a lux block. The sun moves along the arc
+ * with the current lux value (logarithmic scale 0 - LUX_SLIDER_MAX, values above
+ * the maximum are clamped).
+ * @param {object} block
+ */
+function postHookLux(block) {
+  var lux = parseFloat(block.device && block.device['Data']);
+  if (isNaN(lux)) return;
+  // Logarithmic scale: 0 lux at the far left, LUX_SLIDER_MAX at the far right
+  var fraction = Math.min(
+    Math.max(
+      Math.log(1 + lux / LUX_SLIDER_KNEE) /
+        Math.log(1 + LUX_SLIDER_MAX / LUX_SLIDER_KNEE),
+      0
+    ),
+    1
+  );
+  // Half circle from (10,58) to (110,58) around (60,58), radius 50. The sun
+  // sits on the arc at the position that belongs to the current lux value.
+  var angle = Math.PI * fraction;
+  var sunX = Math.round((60 - 50 * Math.cos(angle)) * 10) / 10;
+  var sunY = Math.round((58 - 50 * Math.sin(angle)) * 10) / 10;
+  var arc = 'M10 58 A50 50 0 0 1 110 58';
+  var gradId = 'luxgrad_' + String(block.key).replace(/\W/g, '_');
+  var html =
+    '<div class="lux-slider"><div class="lux-arc"><svg viewBox="0 0 120 66" focusable="false">' +
+    '<defs><linearGradient id="' +
+    gradId +
+    '" gradientUnits="userSpaceOnUse" x1="10" y1="0" x2="110" y2="0">' +
+    '<stop offset="0" stop-color="#6b7686"/>' +
+    '<stop offset="0.15" stop-color="#8fa3bf"/>' +
+    '<stop offset="0.4" stop-color="#e8dc8c"/>' +
+    '<stop offset="0.65" stop-color="#ffd600"/>' +
+    '<stop offset="1" stop-color="#ffb300"/></linearGradient>' +
+    '<filter id="' +
+    gradId +
+    '_glow" x="-100%" y="-100%" width="300%" height="300%">' +
+    '<feGaussianBlur stdDeviation="3"/></filter></defs>' +
+    '<path class="lux-arc-track" d="' +
+    arc +
+    '" pathLength="100"/>' +
+    '<path class="lux-arc-fill" d="' +
+    arc +
+    '" pathLength="100" stroke="url(#' +
+    gradId +
+    ')" stroke-dasharray="' +
+    Math.round(fraction * 1000) / 10 +
+    ' 200"/>' +
+    '<circle class="lux-arc-glow" cx="' +
+    sunX +
+    '" cy="' +
+    sunY +
+    '" r="9" filter="url(#' +
+    gradId +
+    '_glow)"/>' +
+    '<circle class="lux-arc-sun" cx="' +
+    sunX +
+    '" cy="' +
+    sunY +
+    '" r="5.5"/>' +
+    '</svg>' +
+    '<div class="lux-arc-value"></div></div></div>';
+  var $block = block.$mountPoint.find('[data-id="' + block.key + '"]');
+  // The value moves from the text column into the middle of the arc
+  var $value = $block.find('.col-data .value').first();
+  $block.addClass('lux-has-slider').append(html);
+  if ($value.length) {
+    $block.find('.lux-arc-value').text($value.text());
+    $block.addClass('lux-has-value');
+  }
+}
+
 /*exported postHookLogitechMediaServer */
 function postHookLogitechMediaServer(block) {
   var device = block.device;
@@ -1603,11 +1723,16 @@ function getSelectorSwitch(block) {
       typeof device['SelectorStyle'] !== 'undefined' &&
       device['SelectorStyle'] == 1
     ) {
+      block.$mountPoint.find('.mh').removeClass('dt-selector-compact');
       html += '<div class="col-xs-8 col-data">';
       if (!hideTitle(block))
         html += '<strong class="title">' + block.title + '</strong><br />';
       html += '<select>';
-      html += '<option value="">' + language.misc.select + '</option>';
+      // No placeholder "Select..." option here on purpose: a Selector
+      // Switch's dropdown is meant to show only its own real levels (a
+      // device's own hidden/off level already stays out via LevelOffHidden
+      // below) - an extra generic placeholder above them just read as a
+      // second, redundant "please choose" row alongside it.
       for (var idx in nameValues) {
         var nv = nameValues[idx];
         if (
@@ -1637,6 +1762,27 @@ function getSelectorSwitch(block) {
           slideDevice(block, $(this).val());
         });
     } else {
+      var visibleLevels = nameValues.filter(function (nv) {
+        return (
+          parseFloat(nv.value) > 0 ||
+          (nv.value == 0 &&
+            (typeof device['LevelOffHidden'] == 'undefined' ||
+              device['LevelOffHidden'] === false))
+        );
+      });
+      // Device Config "Compact" option (block.compactSelector): compact
+      // block with small buttons (themes/modern-dark .dt-selector-compact).
+      // A level with an icon (block.compactIcons[level], chosen in Device
+      // Config) shows only that icon; a selector with exactly three levels
+      // and no icon chosen gets up/minus/down by position. Any other level
+      // keeps its name as button text.
+      var compact = block.compactSelector === true;
+      var defaultIcons = [
+        'fas fa-chevron-up',
+        'fas fa-minus',
+        'fas fa-chevron-down',
+      ];
+      block.$mountPoint.find('.mh').toggleClass('dt-selector-compact', compact);
       html += '<div class="col-xs-8 col-data">';
       if (!hideTitle(block))
         html += '<strong class="title">' + block.title + '</strong><br />';
@@ -1652,14 +1798,38 @@ function getSelectorSwitch(block) {
           var st = '';
           if (nv.value * 10 == parseFloat(device['Level'])) st = 'active';
           var checked = st ? ' checked' : '';
-          html += '<label class="btn btn-default ' + st + '">';
+          var levelIcon = '';
+          if (compact) {
+            levelIcon = String(
+              (block.compactIcons && block.compactIcons[nv.value]) ||
+                (visibleLevels.length === 3
+                  ? defaultIcons[visibleLevels.indexOf(nv)] || ''
+                  : '')
+            );
+            if (!/^[A-Za-z0-9 _-]+$/.test(levelIcon)) levelIcon = '';
+          }
+          html +=
+            '<label class="btn btn-default ' +
+            st +
+            (levelIcon ? ' dt-sc-icon' : '') +
+            '"';
+          // The level name is hidden visually behind an icon; keep it
+          // available as tooltip and accessible name.
+          if (levelIcon) {
+            var levelLabel = String(nv.name).replace(/"/g, '&quot;');
+            html +=
+              ' title="' + levelLabel + '" aria-label="' + levelLabel + '"';
+          }
+          html += '>';
           html +=
             '<input type="radio" name="options" autocomplete="off" value="' +
             nv.value * 10 +
             '"' +
             checked +
-            '>' +
-            nv.name;
+            '>';
+          if (levelIcon)
+            html += '<i class="' + levelIcon + '" aria-hidden="true"></i>';
+          html += nv.name;
           html += '</label>';
         }
       }

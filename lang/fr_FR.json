@@ -104,6 +104,7 @@
     "no_appointments": "Aucun rendez-vous.",
     "calendar_missing": "L'URL du calendrier est manquante.",
     "no_traffic": "Aucune annonce de trafic.",
+    "traffic_error": "Impossible de récupérer les informations de trafic.",
     "no_alerts": "Aucune alerte en cours.",
     "weather_loading": "Chargement de la météo...",
     "weather_api_missing": "Aucune clé API météo valide.",
@@ -112,6 +113,7 @@
     "alert_feed_error": "Erreur lors du chargement du flux Alarmeringen.nl.",
     "news_error": "Erreur lors du chargement des actualités.",
     "launch_full_calendar": "Ouvrir le calendrier complet",
+    "calendar_url_missing": "Ajouter un lien vers le calendrier complet",
     "map_api_invalid": "Clé API Google Maps non valide.",
     "see_documentation_prefix": "Voir",
     "map_documentation": "la documentation Google Maps de Dashticz",
@@ -119,7 +121,63 @@
     "browser_not_supported": "Votre navigateur n’est malheureusement pas pris en charge.",
     "wu_settings_missing": "Les paramètres Weather Underground sont manquants.",
     "widget_not_visible": "Le widget n’est pas visible ?",
-    "more_info": "Plus d’informations"
+    "more_info": "Plus d’informations",
+    "lms_player_off": "Lecteur éteint",
+    "lms_player_unavailable": "Lecteur indisponible",
+    "lms_server_unavailable": "LMS indisponible",
+    "lms_paused": "En pause",
+    "postnl_status_open": "En transit",
+    "postnl_status_intransit": "En transit",
+    "postnl_status_delivered": "Livré",
+    "postnl_status_returntosender": "Retourné à l’expéditeur",
+    "postnl_unknown_sender": "Inconnu",
+    "postnl_not_configured": "Configurez votre compte PostNL dans Paramètres -> Widgets -> PostNL.",
+    "postnl_error": "Impossible de récupérer les envois PostNL.",
+    "hpilo_not_configured": "Configurez votre iLO dans Paramètres -> Widgets -> HP iLO.",
+    "hpilo_error": "Impossible de récupérer les données de l’iLO.",
+    "f1_error": "Impossible de récupérer le calendrier F1.",
+    "tvgids_error": "Impossible de récupérer le guide TV.",
+    "tvgids_empty": "Plus de programmes aujourd’hui.",
+    "tvgids_nochannels": "Choisissez les chaînes dans les paramètres du bloc.",
+    "fullykiosk_battery": "Batterie",
+    "fullykiosk_next_stop": "Charger jusqu'à",
+    "fullykiosk_next_start": "Charger à partir de",
+    "fullykiosk_charging": "Charge",
+    "fullykiosk_not_configured": "Saisissez l'hôte de la tablette dans les paramètres du widget.",
+    "fullykiosk_error": "Impossible de joindre la tablette.",
+    "fullykiosk_charging_row": "Branché",
+    "fullykiosk_on": "Marche",
+    "fullykiosk_off": "Arrêt",
+    "fullykiosk_screen": "Écran",
+    "fullykiosk_screensaver": "Économiseur d'écran",
+    "fullykiosk_motion": "Détecteur de mouvement",
+    "fullykiosk_brightness": "Luminosité",
+    "fullykiosk_loadurl": "Charger l'URL de départ",
+    "weatherinfo_rainfall": "Précipitations",
+    "weatherinfo_nolocation": "Aucune position trouvée. Saisissez la latitude et la longitude dans les réglages du widget.",
+    "weatherinfo_error": "Impossible de récupérer la météo.",
+    "hpilo_name": "Nom du serveur",
+    "hpilo_model": "Modèle",
+    "hpilo_power": "Alimentation du serveur",
+    "hpilo_health": "État du serveur",
+    "hpilo_uptime": "Durée de fonctionnement",
+    "hpilo_fanspeed": "Vitesse des ventilateurs",
+    "hpilo_cputemp": "Température du processeur",
+    "hpilo_inlettemp": "Température d’entrée",
+    "hpilo_watts": "Consommation électrique",
+    "hpilo_storage": "État du stockage",
+    "hpilo_firmware": "Micrologiciel iLO",
+    "hpilo_serial": "Numéro de série",
+    "hpilo_ssdlife": "Durée de vie SSD",
+    "hpilo_network": "Réseau",
+    "hpilo_minfan": "Vitesse minimale des ventilateurs",
+    "hpilo_thermalconfig": "Configuration thermique",
+    "hpilo_powerregulator": "Régulateur d’alimentation",
+    "hpilo_value_on": "Allumé",
+    "hpilo_value_off": "Éteint",
+    "hpilo_value_ok": "OK",
+    "hpilo_value_warning": "Avertissement",
+    "hpilo_value_critical": "Critique"
   },
   "settings": {
     "title": "Paramètres Dashticz",
@@ -174,7 +232,7 @@
       "wizard_mode_desc": "Créez et modifiez le tableau de bord visuellement avec l’Éditeur d’écran.",
       "save_failed": "Impossible d’enregistrer le mode de configuration.",
       "warning_title": "Modifier le mode de configuration ?",
-      "confirm_wizard": "Le passage à l’Assistant supprime la configuration actuelle du tableau de bord, efface les blocs, colonnes et écrans de CONFIG.js, puis crée une page vierge. Les paramètres de configuration sont conservés.",
+      "confirm_wizard": "Le passage à l’Assistant convertit l’écran affiché en disposition en grille et ouvre l’éditeur d’écran. Vos blocs, colonnes, autres écrans et paramètres restent dans CONFIG.js ; les autres écrans sont convertis lorsque vous les ouvrez dans l’éditeur d’écran. Faites d’abord une copie de CONFIG.js si vous voulez conserver votre version écrite à la main.",
       "confirm_custom": "Le passage au mode Personnalisé conserve la configuration actuelle du tableau de bord, mais masque les commandes de l’Éditeur d’écran. Vous pouvez continuer à gérer le tableau de bord manuellement dans CONFIG.js.",
       "cancel": "Annuler",
       "continue": "Continuer"
@@ -202,7 +260,26 @@
       "news": "Actualités",
       "clock_scale": "Échelle",
       "clock_scale_help": "Facteur d’échelle relatif, ex : 0.75 (défaut 1)",
-      "miniclock_note": "Miniclock n’a pas d’options d’affichage supplémentaires."
+      "miniclock_note": "Miniclock n’a pas d’options d’affichage supplémentaires.",
+      "traffic_jams": "Embouteillages",
+      "traffic_jams_help": "Afficher les embouteillages.",
+      "traffic_roadworks": "Travaux",
+      "traffic_roadworks_help": "Afficher les travaux routiers.",
+      "traffic_results": "Résultats max.",
+      "traffic_results_help": "Nombre maximal d’éléments : par route pour Routes choisies, au total pour un rayon.",
+      "traffic_max_distance": "Distance max. (km)",
+      "traffic_max_distance_help": "N’afficher que les éléments situés à cette distance (en km, à vol d’oiseau) de l’emplacement ci-dessous. Laisser vide pour tout afficher (uniquement RWS pour l’instant).",
+      "traffic_latitude": "Latitude",
+      "traffic_longitude": "Longitude",
+      "traffic_location_help": "Emplacement de référence pour la distance max. Laissez Latitude et Longitude vides pour utiliser l’emplacement configuré dans Domoticz (Réglages > Système > Emplacement) - ne les remplissez vous-même que s’il n’est pas défini.",
+      "traffic_filter": "Afficher",
+      "traffic_filter_distance": "Tout dans un rayon donné",
+      "traffic_filter_roads": "Routes choisies",
+      "traffic_filter_help": "Tout dans un rayon autour d’un emplacement, ou uniquement les routes indiquées.",
+      "traffic_roads": "Routes",
+      "traffic_roads_help": "Numéros de route séparés par des virgules, par exemple A4, A17, N201. Ils sont affichés dans cet ordre.",
+      "traffic_showemptyroads": "Afficher les routes sans annonces",
+      "traffic_showemptyroads_help": "Afficher aussi une route sans embouteillages ni travaux."
     },
     "deviceeditor": {
       "editor_title": "Éditeur d’appareils",
@@ -222,8 +299,8 @@
       "icon": "Icône",
       "hide_data": "Données",
       "last_update": "Maj",
-      "switch": "Switch",
-      "dial": "Dial",
+      "switch": "Interrupteur",
+      "dial": "Cadran",
       "dial_hint": "Type Dial sélectionné. Configurez les autres options du dial (couleur, min/max, sous-type, values, etc.) manuellement via les Champs supplémentaires ci-dessous.",
       "dial_hint_link": "Documentation Dial",
       "dial_bar": "Barre",
@@ -235,12 +312,12 @@
       "widget_config": "Configuration du widget",
       "configure": "Configurer",
       "custom_fields": "Champs supplémentaires",
-      "custom_fields_help": "Field et Setting sont enregistrés comme paramètres typés du bloc dans CONFIG.js.",
+      "custom_fields_help": "Champ et Valeur sont enregistrés comme paramètres typés du bloc dans CONFIG.js.",
       "custom_devices": "Appareils personnalisés",
       "separator": "Séparateur",
       "icon_requires_checkbox": "Activez Icône avant d’utiliser le champ icon.",
-      "field": "Field",
-      "setting": "Setting",
+      "field": "Champ",
+      "setting": "Valeur",
       "add_field": "Ajouter un champ",
       "remove_field": "Supprimer le champ",
       "invalid_field": "Saisissez des valeurs Field et Setting valides.",
@@ -280,7 +357,306 @@
       "add_value_row": "Ajouter une valeur",
       "remove_value_row": "Supprimer la valeur",
       "invalid_multi_device_name": "Saisissez un nom d’appareil unique et valide.",
-      "invalid_value_row": "Saisissez un espace réservé de valeur (ex. <Usage>) pour chaque ligne."
+      "invalid_value_row": "Saisissez un espace réservé de valeur (ex. <Usage>) pour chaque ligne.",
+      "dial_needle": "Curseur",
+      "dial_inverse": "Inverser",
+      "dial_inverse_help": "0 % correspond à entièrement ouvert au lieu de 100 %. Détecté automatiquement d’après le type Domoticz de l’appareil si vous n’y touchez pas.",
+      "compact_selector": "Compact",
+      "compact_selector_help": "Afficher le titre et les trois boutons de niveau (par exemple Ouvert/Mi-ouvert/Fermé) sur une seule ligne, sous forme de petits boutons à icône. Ne s’applique qu’aux sélecteurs à exactement trois niveaux.",
+      "compact_icons": "Icône par niveau",
+      "compact_icon_auto": "Automatique",
+      "compact_icon_custom": "Classe Font Awesome personnalisée...",
+      "reverseicon": "Inverser",
+      "reverseicon_help": "Inverser l'atténuation : icône ou image à pleine intensité à l'arrêt et atténuée à l'état allumé.",
+      "text_style": "Texte",
+      "text_fontsize_title": "Taille du titre",
+      "text_fontsize_value": "Taille de la valeur",
+      "text_align": "Alignement",
+      "text_align_default": "Par défaut du thème",
+      "text_align_left": "Gauche",
+      "text_align_center": "Centré",
+      "text_align_right": "Droite",
+      "text_style_help": "Tailles de police en pixels. Les champs vides et « Par défaut du thème » utilisent le thème choisi (ou le style de base) ; les valeurs saisies ici le remplacent uniquement pour ce bloc.",
+      "custom_images": "Images personnalisées",
+      "loading_images": "Chargement des images…",
+      "no_custom_images": "Aucune image personnalisée trouvée.",
+      "custom_images_error": "Impossible de charger les images personnalisées.",
+      "custom_device_title": "Titre",
+      "group_block": "Groupe",
+      "group_name": "Nom du groupe",
+      "group_name_help": "Utilisé comme clé blocks[...] dans CONFIG.js.",
+      "group_idx": "IDX du groupe/de la scène",
+      "group_idx_help": "Facultatif. ID du groupe ou de la scène Domoticz dont les appareils sont regroupés.",
+      "group_devices": "Appareils",
+      "group_devices_help": "ID d’appareils Domoticz séparés par des virgules à regrouper (utilisé si l’IDX est vide).",
+      "group_title": "Titre",
+      "invalid_group_name": "Saisissez un nom de groupe valide et unique.",
+      "invalid_group_devices": "Saisissez un IDX de groupe/scène ou au moins un ID d’appareil valide.",
+      "cluster_block": "Cluster",
+      "cluster_name": "Nom du cluster",
+      "cluster_name_help": "Utilisé comme clé blocks[...] dans CONFIG.js.",
+      "cluster_title": "Titre",
+      "cluster_devices": "Appareils",
+      "cluster_devices_help": "Choisissez un appareil et cliquez sur + pour l’ajouter au cluster. Chaque appareil a son propre interrupteur marche/arrêt.",
+      "cluster_devices_help_temperature": "Choisissez un appareil et cliquez sur + pour l’ajouter au cluster. Chaque appareil affiche sa propre température.",
+      "cluster_devices_help_other": "Choisissez un appareil et cliquez sur + pour l’ajouter au cluster. Seuls les appareils qui ne sont ni un interrupteur ni un capteur de température sont listés ; chaque ligne affiche la valeur de l’appareil.",
+      "cluster_no_devices": "Aucun appareil ajouté.",
+      "cluster_row_name": "Nom personnalisé pour cette ligne (laisser vide pour utiliser le nom de l’appareil).",
+      "cluster_usage": "Consommation",
+      "cluster_usage_none": "— Aucune consommation —",
+      "cluster_mode": "Type de ligne",
+      "cluster_mode_switch": "Interrupteur",
+      "cluster_mode_temperature": "Température",
+      "cluster_mode_other": "Autre",
+      "cluster_mode_locked_help": "Le type de ligne ne peut plus être modifié une fois le cluster enregistré.",
+      "cluster_switch_scale": "Taille de l’interrupteur",
+      "cluster_switch_scale_help": "Facteur d’échelle de l’interrupteur marche/arrêt (par ex. 1,5 pour 150 %). Laisser vide pour la taille par défaut.",
+      "cluster_font_size": "Taille de police (px)",
+      "cluster_font_size_help": "Taille de police de tout le cluster en pixels (8-60). Laisser vide pour la taille par défaut.",
+      "cluster_icon": "Icône de cette ligne",
+      "cluster_icon_none": "Aucune",
+      "cluster_icon_auto": "Automatique",
+      "invalid_cluster_name": "Saisissez un nom de cluster valide et unique.",
+      "invalid_cluster_devices": "Ajoutez au moins un appareil.",
+      "html_block": "Bloc HTML",
+      "html_block_name": "Nom du bloc",
+      "html_block_name_help": "Utilisé comme clé blocks[...] dans CONFIG.js.",
+      "html_block_file": "Fichier HTML",
+      "html_block_file_help": "Nom de fichier dans le dossier custom/, par ex. widget.html.",
+      "html_block_title": "Titre",
+      "html_block_border": "Marge",
+      "invalid_html_block_name": "Saisissez un nom de bloc valide et unique.",
+      "invalid_html_block_file": "Saisissez un nom de fichier HTML valide (relatif à custom/).",
+      "iframe_block": "iFrame",
+      "iframe_block_url": "URL",
+      "iframe_block_url_help": "URL complète avec http(s)://. Le serveur distant doit autoriser l’intégration (pas de X-Frame-Options: DENY).",
+      "iframe_block_height": "Hauteur (px)",
+      "iframe_block_scrollbars": "Afficher les barres de défilement",
+      "iframe_block_scaletofit": "Largeur de mise à l’échelle (px)",
+      "iframe_block_aspectratio": "Rapport d’aspect",
+      "iframe_block_forcerefresh": "Forcer l’actualisation du cache",
+      "iframe_block_refresh": "Intervalle d’actualisation (secondes)",
+      "invalid_iframe_block_url": "Saisissez une URL valide.",
+      "calendar_block": "Calendrier",
+      "calendar_block_icalurl": "URL du calendrier (ICS)",
+      "calendar_block_icalurl_help": "L’adresse ICAL secrète de votre calendrier (voir la documentation Calendrier pour la trouver).",
+      "calendar_block_holidayurl": "URL du calendrier des jours fériés (facultatif)",
+      "calendar_block_layout": "Mise en page",
+      "calendar_block_layout_0": "Agenda (texte)",
+      "calendar_block_layout_1": "Agenda (tableau)",
+      "calendar_block_layout_2": "Calendrier traditionnel (tableau)",
+      "calendar_block_layout_3": "Anniversaires, toute la journée (texte)",
+      "calendar_block_layout_4": "Anniversaires, toute la journée (tableau)",
+      "calendar_block_maxitems": "Nombre maximal d’événements",
+      "calendar_block_weeks": "Nombre de semaines (mise en page : Calendrier traditionnel)",
+      "calendar_block_lastweek": "Afficher la semaine précédente",
+      "calendar_block_isoweek": "La semaine commence le lundi",
+      "calendar_block_startonly": "Afficher uniquement l’heure de début",
+      "invalid_calendar_block_icalurl": "Saisissez une URL de calendrier (ICS) valide.",
+      "calendar_source": "Calendrier",
+      "calendar_source_plural": "calendriers",
+      "calendar_default_name": "Calendrier",
+      "calendar_name": "Nom",
+      "calendar_color": "Couleur",
+      "calendar_add": "Ajouter un calendrier",
+      "calendar_remove": "Supprimer le calendrier",
+      "calendar_name_required": "Saisissez un nom pour chaque calendrier.",
+      "calendar_duplicate_name": "Les noms des calendriers doivent être uniques.",
+      "ics_url": "URL ICS",
+      "publictransport_block": "Transports publics",
+      "publictransport_block_provider": "Fournisseur",
+      "publictransport_block_provider_treinen": "Trains (NL)",
+      "publictransport_block_provider_ovapi": "OV API (NL)",
+      "publictransport_block_provider_drgl": "DRGL (NL)",
+      "publictransport_block_provider_irailbe": "iRail (BE)",
+      "publictransport_block_provider_delijnbe": "De Lijn (BE)",
+      "publictransport_block_station": "Gare (code)",
+      "publictransport_block_station_help": "Par exemple UT pour Utrecht Centraal (trains).",
+      "publictransport_block_tpc": "Arrêt (code tpc, facultatif)",
+      "publictransport_block_tpc_help": "À utiliser à la place de Gare pour n’afficher qu’un arrêt/quai précis.",
+      "publictransport_block_direction": "Filtre de direction (facultatif)",
+      "publictransport_block_results": "Nombre de résultats",
+      "publictransport_block_showvia": "Afficher via",
+      "invalid_publictransport_block_station": "Saisissez une gare ou un code tpc.",
+      "timegraph_block": "Timegraph",
+      "timegraph_block_idx": "IDX de l’appareil Domoticz",
+      "timegraph_block_idx_help": "L’appareil dont la valeur est représentée.",
+      "timegraph_block_duration": "Durée (secondes)",
+      "timegraph_block_height": "Hauteur (px)",
+      "timegraph_block_xticks": "Étiquettes de l’axe X (nombre)",
+      "timegraph_block_yticks": "Étiquettes de l’axe Y (nombre)",
+      "timegraph_block_xlabels": "Afficher les étiquettes de l’axe du temps",
+      "invalid_timegraph_block_idx": "Saisissez un IDX d’appareil Domoticz valide.",
+      "xmltvguide_block": "Guide TV",
+      "xmltvguide_block_url": "URL XMLTV",
+      "xmltvguide_block_url_help": "URL d’un fichier de guide au format XMLTV, par ex. http://my-epg-server/guide.xml.",
+      "xmltvguide_block_channels": "Chaînes",
+      "xmltvguide_block_channels_help": "Noms ou ID de chaînes à afficher, séparés par des virgules.",
+      "xmltvguide_block_maxitems": "Nombre maximal de programmes",
+      "xmltvguide_block_layout": "Mise en page",
+      "xmltvguide_block_layout_0": "Afficher le nom de la chaîne",
+      "xmltvguide_block_layout_1": "Masquer le nom de la chaîne",
+      "xmltvguide_block_refresh": "Intervalle d’actualisation (secondes)",
+      "invalid_xmltvguide_block_url": "Saisissez une URL XMLTV valide.",
+      "camera_block": "Caméra",
+      "camera_block_imageurl": "URL de l’image",
+      "camera_block_imageurl_help": "URL complète de l’instantané de la caméra, actualisé régulièrement.",
+      "camera_block_videourl": "URL vidéo (facultatif, MJPEG)",
+      "camera_block_videourl_help": "Nécessaire uniquement pour un flux MJPEG en direct au lieu d’un instantané actualisé.",
+      "camera_block_height": "Hauteur (px)",
+      "camera_block_refresh": "Intervalle d’actualisation (secondes)",
+      "camera_block_forcerefresh": "Forcer l’actualisation du cache",
+      "invalid_camera_block_imageurl": "Saisissez une URL d’image valide.",
+      "news_block": "Actualités",
+      "news_block_feed": "URL du flux RSS",
+      "news_block_feed_help": "URL complète d’un flux d’actualités RSS/Atom.",
+      "news_block_maxheight": "Hauteur maximale (px)",
+      "news_block_showimages": "Afficher les images",
+      "invalid_news_block_feed": "Saisissez une URL de flux d’actualités valide.",
+      "f1_block": "F1",
+      "f1_block_mode": "Afficher",
+      "f1_block_mode_next": "Prochain événement",
+      "f1_block_mode_all": "Tous les événements",
+      "f1_block_language": "Langue",
+      "f1_block_utcoffset": "Décalage UTC en heures (facultatif)",
+      "f1_block_utcoffset_help": "Décalage fixe ajouté aux horaires. Laisser vide pour utiliser le fuseau horaire du navigateur (heure d'été incluse).",
+      "f1_block_pollminutes": "Intervalle d’interrogation (minutes)",
+      "f1_block_pollminutes_help": "Fréquence de téléchargement du calendrier. Minimum 5. Par défaut : 60.",
+      "f1_block_sessions": "Sessions affichées",
+      "f1_block_sessions_all": "Essais / Sprint / Course",
+      "f1_block_sessions_sprint_race": "Sprint / Course",
+      "f1_block_sessions_race": "Course",
+      "f1_block_visibility": "Visibilité du prochain événement (jours)",
+      "f1_block_visibility_help": "Afficher la prochaine session ce nombre de jours avant son début. Par défaut : 3.",
+      "f1_block_emptytext": "Texte sans événement",
+      "f1_block_emptytext_help": "Affiché lorsqu’aucun événement n’a lieu dans la période de visibilité. Vide = rien.",
+      "f1_block_fontsize": "Taille de police (px)",
+      "f1_block_fontsize_help": "Taille de police en pixels (8-60). Laisser vide pour la taille par défaut.",
+      "f1_block_hideimage": "Masquer l’image s’il n’y a pas d’événement",
+      "f1_block_image": "Image (avant le texte du prochain événement)",
+      "f1_block_image_help": "Choisissez une image du dossier img/. Elle s’affiche devant le texte d’une tuile Prochain événement ; l’icône reste.",
+      "f1_block_url_en": "URL du calendrier (anglais)",
+      "f1_block_url_nl": "URL du calendrier (néerlandais)",
+      "f1_block_url_help": "Flux ICS avec le calendrier F1 (https).",
+      "tvgids_block": "TVgids24",
+      "tvgids_block_channels": "Chaînes",
+      "tvgids_block_channels_help": "Cliquez sur un logo pour ajouter ou retirer cette chaîne. Les numéros indiquent l’ordre des colonnes dans le bloc.",
+      "tvgids_block_channels_error": "Impossible de charger la liste des chaînes.",
+      "tvgids_block_maxitems": "Programmes par chaîne",
+      "tvgids_block_maxitems_help": "À partir du programme en cours. 0 = le reste de la journée. Par défaut : 10.",
+      "tvgids_block_columnwidth": "Largeur minimale des colonnes (px)",
+      "tvgids_block_columnwidth_help": "Le bloc affiche autant de colonnes de chaînes côte à côte que possible. Par défaut : 250.",
+      "tvgids_block_fontsize": "Taille de police (px)",
+      "tvgids_block_fontsize_help": "Taille de police en pixels (8-60). Laisser vide pour la taille par défaut.",
+      "tvgids_block_pollminutes": "Intervalle de récupération (minutes)",
+      "tvgids_block_pollminutes_help": "Fréquence de téléchargement du programme d’une chaîne. Minimum 15. Par défaut : 60.",
+      "tvgids_block_showpast": "Afficher aussi les programmes terminés",
+      "tvgids_block_hidelogo": "Nom de la chaîne au lieu du logo",
+      "tvgids_block_logobg": "Couleur de fond du cadre du logo",
+      "tvgids_block_transparent": "Transparent",
+      "fully_block": "Fully Kiosk",
+      "fully_block_host": "Hôte de la tablette",
+      "fully_block_host_help": "Adresse IP ou nom d'hôte de la tablette (l'administration à distance de Fully Kiosk doit être activée).",
+      "fully_block_port": "Port",
+      "fully_block_password": "Mot de passe Remote Admin",
+      "fully_block_https": "Utiliser HTTPS",
+      "fully_block_switch": "Interrupteur du chargeur",
+      "fully_block_switch_help": "L'interrupteur Domoticz qui commande le chargeur de la tablette.",
+      "fully_block_auto": "Régulation automatique de la charge",
+      "fully_block_auto_help": "Allume et éteint le chargeur à un pourcentage aléatoire, comme le plugin domoticz_fullykiosk. À ne pas combiner avec la régulation du plugin pour le même chargeur.",
+      "fully_block_startmin": "Démarrer la charge à partir de (%)",
+      "fully_block_startmax": "Démarrer la charge jusqu'à (%)",
+      "fully_block_stopmin": "Arrêter la charge à partir de (%)",
+      "fully_block_stopmax": "Arrêter la charge jusqu'à (%)",
+      "fully_block_hardmin": "Toujours démarrer à ou sous (%)",
+      "fully_block_hardmax": "Toujours arrêter à ou au-dessus (%)",
+      "fully_block_showbattery": "Afficher le pourcentage de batterie",
+      "fully_block_showcharging": "Afficher l'état de charge (branché)",
+      "fully_block_showscreen": "Afficher écran marche/arrêt",
+      "fully_block_showscreensaver": "Afficher économiseur d'écran marche/arrêt",
+      "fully_block_showmotion": "Afficher détecteur de mouvement marche/arrêt",
+      "fully_block_showbrightness": "Afficher la luminosité",
+      "fully_block_showloadurl": "Afficher le bouton Charger l'URL de départ",
+      "fully_block_fontsize": "Taille de police (px)",
+      "fully_block_fontsize_help": "Taille de police en pixels (8-60). Laisser vide pour la taille par défaut.",
+      "invalid_fully_block_host": "Saisissez l'hôte de la tablette.",
+      "weatherinfo_block": "Météo",
+      "weatherinfo_block_lat": "Latitude (facultatif)",
+      "weatherinfo_block_lat_help": "Laissez la latitude et la longitude vides pour utiliser la position de Domoticz.",
+      "weatherinfo_block_lon": "Longitude (facultatif)",
+      "weatherinfo_block_pollminutes": "Intervalle de mise à jour (minutes)",
+      "weatherinfo_block_pollminutes_help": "Fréquence de téléchargement des prévisions de pluie (1-60). La météo actuelle est téléchargée toutes les 15 minutes. Par défaut : 5.",
+      "weatherinfo_block_language": "Langue",
+      "weatherinfo_block_language_help": "Langue du texte d'état, de la description du temps et de la direction du vent.",
+      "weatherinfo_block_icons": "Icônes météo",
+      "weatherinfo_block_icons_animated": "Icônes animées (SVG)",
+      "weatherinfo_block_icons_emoji": "Emoji (statiques)",
+      "weatherinfo_block_parts": "Éléments du texte",
+      "weatherinfo_block_parts_help": "Choisissez ce qui est affiché et faites glisser les lignes pour définir l'ordre.",
+      "weatherinfo_block_part_status": "État de la pluie",
+      "weatherinfo_block_part_temp": "Température",
+      "weatherinfo_block_part_desc": "Description",
+      "weatherinfo_block_part_wind": "Vent",
+      "weatherinfo_block_part_logo": "Logo (icône météo)",
+      "weatherinfo_block_showrainfall": "Afficher la ligne de précipitations (mm/h)",
+      "weatherinfo_block_fontsize": "Taille de police (px)",
+      "weatherinfo_block_fontsize_help": "Taille de police en pixels (8-60). Laissez vide pour la taille par défaut.",
+      "invalid_weatherinfo_block_location": "Saisissez une latitude et une longitude (nombres), ou laissez les deux vides.",
+      "invalid_tvgids_block_channels": "Choisissez au moins une chaîne.",
+      "tvgids_group_algemeen": "Généralistes",
+      "tvgids_group_overig": "Autres",
+      "tvgids_group_regionaal": "Régionales",
+      "tvgids_group_sport": "Sport",
+      "tvgids_group_films": "Films",
+      "invalid_f1_block_url": "Saisissez des URL de calendrier https valides.",
+      "graph_block": "Graphique",
+      "graph_block_devices": "Appareils (IDX)",
+      "graph_block_devices_help": "ID d’appareils Domoticz séparés par des virgules à combiner dans un seul graphique.",
+      "graph_block_type": "Type de graphique",
+      "graph_block_type_line": "Ligne",
+      "graph_block_type_bar": "Barres",
+      "graph_block_groupby": "Regrouper par",
+      "graph_block_groupby_none": "Aucun",
+      "graph_block_groupby_hour": "Heure",
+      "graph_block_groupby_day": "Jour",
+      "graph_block_groupby_week": "Semaine",
+      "graph_block_groupby_month": "Mois",
+      "graph_block_legend": "Afficher la légende",
+      "graph_block_height": "Hauteur (px)",
+      "invalid_graph_devices": "Saisissez au moins un ID d’appareil valide.",
+      "lms_block": "Lyrion Music Server",
+      "lms_title": "Titre",
+      "lms_server": "Serveur / IP",
+      "lms_port": "Port",
+      "lms_username": "Nom d’utilisateur",
+      "lms_password": "Mot de passe",
+      "lms_credentials_help": "Nécessaire uniquement si l’authentification de Lyrion Music Server est activée.",
+      "lms_test_connection": "Tester la connexion",
+      "lms_testing_connection": "Connexion…",
+      "lms_connection_ok": "Connecté à Lyrion Music Server",
+      "lms_players_found": "lecteur(s) trouvé(s)",
+      "lms_connection_failed": "Impossible de se connecter à Lyrion Music Server",
+      "lms_auth_failed": "Échec de l’authentification",
+      "lms_no_players": "Aucun lecteur LMS trouvé",
+      "lms_player": "Lecteur",
+      "lms_player_placeholder": "Testez la connexion pour lister les lecteurs",
+      "lms_refresh_interval": "Intervalle d’actualisation",
+      "lms_hide_when_off": "Masquer le bloc quand le lecteur est éteint",
+      "lms_text_style": "Style du texte",
+      "lms_title_line": "Titre",
+      "lms_artist_line": "Artiste",
+      "lms_station_line": "Station",
+      "lms_font_size": "Taille (px)",
+      "lms_font_color": "Couleur",
+      "invalid_lms_server": "Saisissez l’adresse du Lyrion Music Server.",
+      "invalid_lms_port": "Saisissez un port valide (1-65535).",
+      "invalid_lms_player": "Testez la connexion et choisissez un lecteur.",
+      "seconds": "secondes",
+      "lms_player_controls": "Commandes du lecteur",
+      "background": "Arrière-plan",
+      "image": "Image",
+      "custom_device_idx": "IDX",
+      "custom_device_idx_help": "IDX de l’appareil Domoticz, 's<idx>' pour un groupe ou une scène (par ex. s3), ou 'v<idx>' pour une variable Domoticz (par ex. v3)."
     },
     "layouteditor": {
       "title": "Éditeur de disposition",
@@ -318,7 +694,8 @@
       "configure_device": "Configurer l’appareil",
       "configure_widget": "Configurer le widget",
       "added_pending": "Élément ajouté. Choisissez Enregistrer pour le conserver, ou Annuler pour l’abandonner.",
-      "discard_pending_confirm": "Abandonner le(s) élément(s) que vous venez d’ajouter ? Ils n’ont pas encore été enregistrés."
+      "discard_pending_confirm": "Abandonner le(s) élément(s) que vous venez d’ajouter ? Ils n’ont pas encore été enregistrés.",
+      "pending_new": "Nouveau – pas encore enregistré"
     },
     "widgeteditor": {
       "title": "Widgets",
@@ -350,9 +727,9 @@
       "updated": "Mise à jour",
       "show_title": "Titre",
       "custom_fields": "Champs personnalisés",
-      "custom_fields_help": "Field et Setting sont enregistrés comme paramètres typés du bloc dans CONFIG.js.",
-      "field": "Field",
-      "setting": "Setting",
+      "custom_fields_help": "Champ et Valeur sont enregistrés comme paramètres typés du bloc dans CONFIG.js.",
+      "field": "Champ",
+      "setting": "Valeur",
       "add_field": "Ajouter un champ",
       "remove_field": "Supprimer le champ",
       "invalid_field": "Saisissez des valeurs Field et Setting valides.",
@@ -515,7 +892,87 @@
       "radio_remove": "Supprimer la station",
       "invalid_radio_url_prefix": "Saisissez une URL de flux HTTP(S) valide pour la station",
       "invalid_radio_no_stations": "Ajoutez au moins une station de radio.",
-      "devices": "Appareils"
+      "devices": "Appareils",
+      "widgets_single_heading": "Widgets (une fois par écran)",
+      "widgets_multi_heading": "Widgets (plusieurs par écran)",
+      "custom_images": "Images personnalisées",
+      "loading_images": "Chargement des images…",
+      "no_custom_images": "Aucune image personnalisée trouvée.",
+      "custom_images_error": "Impossible de charger les images personnalisées.",
+      "postnl_title": "PostNL",
+      "postnl_description": "Envois PostNL entrants et sortants.",
+      "hpilo_title": "HP iLO",
+      "hpilo_description": "État du serveur HPE (alimentation, ventilateurs, températures) via iLO.",
+      "group_block": "Groupe",
+      "cluster_block": "Cluster",
+      "html_block": "Bloc HTML",
+      "lms_block": "Lyrion Music Server",
+      "lms_description": "Lecture en cours d’un lecteur Lyrion Music Server (Logitech Media Server).",
+      "radio_logo": "Logo de la station",
+      "log_title": "Journal Domoticz",
+      "log_description": "Vue défilante du journal des événements Domoticz.",
+      "log_scrolltimeout": "Reprise du défilement automatique après (secondes)",
+      "log_scrolltimeout_help": "Délai après un défilement manuel avant la reprise du défilement automatique. Par défaut : 60.",
+      "log_ascending": "Lignes les plus récentes en bas",
+      "log_height": "Hauteur (px)",
+      "log_height_help": "Hauteur fixe facultative. Laisser vide pour une hauteur automatique.",
+      "log_aspectratio": "Rapport d’aspect",
+      "log_aspectratio_help": "Hauteur divisée par la largeur. Utilisé uniquement si Hauteur ci-dessus est vide.",
+      "sunrise_title": "Lever / coucher du soleil",
+      "sunrise_description": "Heures de lever et de coucher du soleil aujourd’hui.",
+      "owm_title": "OpenWeatherMap",
+      "owm_description": "Widget OpenWeatherMap avec 24 mises en page au choix.",
+      "owm_apikey": "Clé API",
+      "owm_apikey_help": "Laisser vide pour utiliser le réglage global config['owm_api'] (configuré dans le widget Météo).",
+      "owm_layout": "Mise en page",
+      "owm_layout_option": "Mise en page",
+      "owm_city_field": "Ville",
+      "owm_city_field_help": "Nom de la ville ou identifiant de ville OpenWeatherMap. Laisser vide pour utiliser le réglage global config['owm_city'].",
+      "owm_country_field": "Pays",
+      "owm_country_field_help": "Code pays, par ex. 'fr'. Laisser vide pour utiliser le réglage global config['owm_country'].",
+      "f1_title": "F1",
+      "f1_description": "Week-end de course de Formule 1 : la prochaine session ou toutes les sessions (plugin domoticz_F1).",
+      "tvgids_title": "TVgids24",
+      "tvgids_description": "Le programme TV du jour des chaînes choisies (tvgids24.nl).",
+      "fullykiosk_title": "Fully Kiosk",
+      "fullykiosk_description": "Batterie d'une tablette Fully Kiosk avec régulation de la charge (plugin domoticz_fullykiosk).",
+      "weatherinfo_title": "Météo",
+      "weatherinfo_description": "Prévisions de pluie et météo actuelle (Buienradar et Open-Meteo, plugin domoticz_weatherinfo).",
+      "graph_title": "Graphique",
+      "graph_description": "Graphique historique d’une ou plusieurs valeurs d’appareils Domoticz, avec les boutons Maintenant/Aujourd’hui/Mois.",
+      "timegraph_title": "Timegraph",
+      "timegraph_description": "Graphique temporel défilant d’une ou plusieurs valeurs d’appareils Domoticz.",
+      "timegraph_idx": "IDX principal",
+      "timegraph_idx_help": "Utilisé par chaque valeur ci-dessous qui n’a pas son propre IDX.",
+      "timegraph_duration": "Durée (secondes)",
+      "timegraph_duration_help": "Durée de la fenêtre défilante du graphique, en secondes. Par défaut : 300.",
+      "timegraph_height": "Hauteur (px)",
+      "timegraph_height_help": "Hauteur fixe facultative, par ex. 300px. Laisser vide pour une hauteur automatique.",
+      "timegraph_axes": "Axes",
+      "timegraph_xticks": "Étiquettes de l’axe X (nombre)",
+      "timegraph_xticks_help": "Nombre d’étiquettes sur l’axe du temps. Par défaut : 10.",
+      "timegraph_yticks": "Étiquettes de l’axe Y (nombre)",
+      "timegraph_yticks_help": "Nombre d’étiquettes sur l’axe vertical. Par défaut : 5.",
+      "timegraph_xlabels": "Afficher les étiquettes de l’axe du temps",
+      "timegraph_appearance": "Apparence",
+      "timegraph_animation": "Animation (ms)",
+      "timegraph_animation_help": "Durée de l’effet d’animation en millisecondes. Par défaut : 0.",
+      "timegraph_linetension": "Tension de la courbe",
+      "timegraph_linetension_help": "Lisse la courbe du graphique. 0 = aucun lissage, par défaut 0,1.",
+      "timegraph_pointradius": "Taille des points",
+      "timegraph_pointradius_help": "Taille du point pour chaque mesure. Par défaut : 1.",
+      "timegraph_values": "Valeurs",
+      "timegraph_values_help": "Ajoutez une valeur par champ d’appareil à afficher. Définissez un IDX par valeur pour combiner les données de plusieurs appareils dans un seul graphique.",
+      "timegraph_value": "Valeur",
+      "timegraph_value_value": "Valeur, par ex. Usage ou NettUsage",
+      "timegraph_value_idx": "IDX (facultatif, appareil principal par défaut)",
+      "timegraph_value_label": "Libellé (facultatif)",
+      "timegraph_add_value": "Ajouter une valeur",
+      "timegraph_remove_value": "Supprimer la valeur",
+      "timegraph_value_required": "Saisissez une valeur (par ex. Temp ou NettUsage) pour la valeur",
+      "log_maxitems": "Nombre maximal de lignes",
+      "log_maxitems_help": "Limite le nombre de lignes de journal affichées pour éviter une barre de défilement. Laisser vide pour aucune limite.",
+      "image": "Image"
     },
     "garbage": {
       "garbage_calendar_id": "ID calendrier Google",
@@ -538,7 +995,11 @@
       "garbage_zipcode": "Code postal",
       "google_api_key": "Clé API Google",
       "google_api_key_help": "La clé API Google est nécessaire pour le calendrier Déchets Google",
-      "title": "Déchets"
+      "title": "Déchets",
+      "garbage_row1_color": "Couleur de la ligne 1",
+      "garbage_row1_fontsize": "Taille de police ligne 1 (px)",
+      "garbage_row2_color": "Couleur des lignes 2+",
+      "garbage_row2_fontsize": "Taille de police lignes 2+ (px)"
     },
     "general": {
       "app_title": "Titre de l’application",
@@ -631,7 +1092,9 @@
       "sr": "Serbe",
       "lt": "Lituanien",
       "ro": "Roumain",
-      "ja": "Japonais"
+      "ja": "Japonais",
+      "calendarurl_link": "Lien vers le calendrier complet",
+      "calendarurl_link_help": "Lien ouvert depuis les événements du calendrier. Les données du calendrier sont configurées séparément avec une source ICS."
     },
     "media": {
       "hide_mediaplayer": "Masquer le lecteur multimédia lorsqu’il est éteint",
@@ -640,7 +1103,7 @@
       "sonarr_apikey": "Clé API Sonarr",
       "sonarr_maxitems": "Nombre maximum d’éléments Sonarr dans la liste",
       "sonarr_url": "URL Sonarr",
-      "spot_clientid": "ClientID Spotify",
+      "spot_clientid": "ID client Spotify",
       "switch_horizon": "Chemin Mediabox Ziggo/UPC",
       "switch_horizon_help": "Si vous avez une mediabox ZIGGO ou UPC (Horizon), copiez switch_horizon.php sur un serveur web dans votre réseau et changez l’IP (de Horizon) dans ce fichier.",
       "title": "Média"
@@ -678,7 +1141,14 @@
       "security_panel_lock": "Charger le panneau de sécurité en plein écran",
       "security_panel_lock_help": "Si le panneau de sécurité Domoticz ou Dashticz est sur 'Arm - Away', Dashticz chargera automatiquement un panneau plein écran.",
       "swiper_touch_move": "Balayer l’écran au toucher",
-      "swiper_touch_move_help": "0 : Désactivé ; 1 : Activé"
+      "swiper_touch_move_help": "0 : Désactivé ; 1 : Activé",
+      "gridColumns": "Colonnes de la grille",
+      "gridColumns_help": "Nombre par défaut de colonnes de même largeur pour les écrans utilisant layout: 'grid' qui ne définissent pas leur propre gridColumns. Par défaut : 24. Ne concerne que les écrans en grille - aucun effet sur la mise en page classique en colonnes. Modifier cette valeur après avoir placé des blocs obligera à les repositionner.",
+      "rowHeight": "Hauteur des lignes de la grille (px)",
+      "rowHeight_help": "Hauteur fixe par défaut des lignes, en pixels, pour les écrans utilisant layout: 'grid' qui ne définissent pas leur propre rowHeight. Par défaut : 20. Ne concerne que les écrans en grille - aucun effet sur la mise en page classique en colonnes. Modifier cette valeur après avoir placé des blocs obligera à les repositionner.",
+      "security_panel_lock_disabled": "Désactivé",
+      "security_panel_lock_away": "Armé absent",
+      "security_panel_lock_home_away": "Armé présent et armé absent"
     },
     "weather": {
       "idx_moonpicture": "IDX de l’image de la lune",
@@ -717,7 +1187,10 @@
       "owm_name": "Nom d’affichage OpenWeatherMap",
       "longfonds_zipcode": "Code postal Longfonds",
       "longfonds_housenumber": "Numéro de maison Longfonds",
-      "dewpoint": "Point de rosée"
+      "dewpoint": "Point de rosée",
+      "waqi_city": "Code de ville WAQI",
+      "waqi_city_help": "Trouvez le code de votre ville sur aqicn.org.",
+      "waqi_layout": "Mise en page"
     },
     "other": {
       "title": "Autre",
@@ -729,7 +1202,654 @@
       "evohome_boost_hw": "Durée du boost eau chaude EvoHome (minutes)"
     },
     "theme": {
-      "custom_css_active": "Feuille de style personnalisée active : {path}"
+      "custom_css_active": "Feuille de style personnalisée active : {path}",
+      "title": "Thème",
+      "colors": "Couleurs",
+      "fonts": "Taille de police",
+      "icons": "Taille des icônes",
+      "vars": {
+        "--main-bg": "Arrière-plan de la page (--main-bg)",
+        "--home-bg": "Arrière-plan de l'accueil (--home-bg)",
+        "--border-color-inactive": "Bordure inactive (--border-color-inactive)",
+        "--border-color-active": "Bordure active (--border-color-active)",
+        "--border-color-block": "Bordure du bloc (--border-color-block)",
+        "--button-bg": "Arrière-plan du bouton (--button-bg)",
+        "--button-hover": "Bouton survolé (--button-hover)",
+        "--button-active": "Bouton actif (--button-active)",
+        "--text-light": "Texte clair (--text-light)",
+        "--text-normal": "Texte normal (--text-normal)",
+        "--text-inactive": "Texte inactif (--text-inactive)",
+        "--selector-bg": "Arrière-plan du sélecteur (--selector-bg)",
+        "--blocktitle": "Titre du bloc (--blocktitle)",
+        "--text-title": "Texte du titre (--text-title)",
+        "--text-status": "Texte du statut (--text-status)",
+        "--font-small": "Texte des données (--font-small)",
+        "--font-large": "Texte de l'en-tête/barre de titre (--font-large)",
+        "--font-device-title": "Texte du titre de l'appareil (--font-device-title)",
+        "--font-update": "Texte de mise à jour (--font-update)",
+        "--icon-font-size": "Icône (--icon-font-size)",
+        "--icon-image-size": "Image (--icon-image-size)",
+        "--icon-column-width": "Largeur de la colonne d'icônes (--icon-column-width)"
+      }
+    },
+    "haymanclock": {
+      "day": "jour",
+      "hours": "heures",
+      "minutes": "minutes",
+      "seconds": "secondes"
+    },
+    "customfieldpresets": {
+      "title": "Champs supplémentaires disponibles",
+      "hint": "Tapez pour filtrer. Vous pouvez toujours saisir un champ personnalisé manuellement.",
+      "noResults": "Aucun préréglage correspondant. Le champ saisi peut toujours être utilisé manuellement.",
+      "alreadyUsed": "Déjà ajouté",
+      "type": "Type",
+      "defaultValue": "Par défaut",
+      "example": "Exemple",
+      "categories": {
+        "visual": "Image / icône",
+        "data": "Données / affichage",
+        "behaviour": "Comportement",
+        "actions": "Actions lors d'un changement",
+        "navigation": "Popup / navigation",
+        "background": "Arrière-plan",
+        "advanced": "Avancé"
+      },
+      "presets": {
+        "hideimageonempty": {
+          "description": "Masque l'image configurée lorsque Data/sValue de l'appareil est vide."
+        },
+        "iconOn": {
+          "description": "Icône Font Awesome à utiliser lorsque l'appareil est allumé."
+        },
+        "iconOff": {
+          "description": "Icône Font Awesome à utiliser lorsque l'appareil est éteint."
+        },
+        "imageOn": {
+          "description": "Image du dossier img/ à utiliser lorsque l'appareil est allumé."
+        },
+        "imageOff": {
+          "description": "Image du dossier img/ à utiliser lorsque l'appareil est éteint."
+        },
+        "addClass": {
+          "description": "Ajoute une classe CSS personnalisée au bloc."
+        },
+        "textOn": {
+          "description": "Texte affiché lorsque l'appareil est allumé."
+        },
+        "textOff": {
+          "description": "Texte affiché lorsque l'appareil est éteint."
+        },
+        "unit": {
+          "description": "Texte placé après la valeur affichée de l'appareil."
+        },
+        "decimals": {
+          "description": "Nombre de décimales utilisé pour la valeur affichée."
+        },
+        "scale": {
+          "description": "Multiplicateur appliqué à la valeur de l'appareil avant l'affichage."
+        },
+        "values": {
+          "description": "Définit quelles valeurs de l'appareil ou sous-appareil sont affichées. Saisir du JSON valide."
+        },
+        "multi_line": {
+          "description": "Affiche plusieurs sous-valeurs sur des lignes séparées."
+        },
+        "single_line": {
+          "description": "Affiche plusieurs sous-valeurs sur une seule ligne."
+        },
+        "showsubtitles": {
+          "description": "Affiche les sous-titres des sous-valeurs. Les variantes prises en charge sont 1 et 2."
+        },
+        "showvalues": {
+          "description": "Tableau des numéros de sous-valeurs à afficher. Saisir du JSON valide."
+        },
+        "sortOrder": {
+          "description": "Tri du sélecteur : 0 aucun, 1 croissant, -1 décroissant."
+        },
+        "batteryThreshold": {
+          "description": "Affiche l'avertissement de batterie en dessous de ce pourcentage."
+        },
+        "flash": {
+          "description": "Fait clignoter le bloc après un changement de valeur pendant ce nombre de millisecondes."
+        },
+        "hide_stop": {
+          "description": "Masque le bouton Stop pour les appareils pris en charge, comme les volets."
+        },
+        "protected": {
+          "description": "Empêche la commande manuelle depuis Dashticz."
+        },
+        "confirmation": {
+          "description": "Demande une confirmation avant de modifier un appareil de type interrupteur."
+        },
+        "password": {
+          "description": "Protège par mot de passe les actions d'interrupteur prises en charge."
+        },
+        "playsound": {
+          "description": "Joue un son lorsque l'appareil change."
+        },
+        "playsoundOn": {
+          "description": "Joue un son lorsque l'appareil passe à On."
+        },
+        "playsoundOff": {
+          "description": "Joue un son lorsque l'appareil passe à Off."
+        },
+        "speak": {
+          "description": "Prononce un texte lorsque l'appareil change."
+        },
+        "speakOn": {
+          "description": "Prononce un texte lorsque l'appareil passe à On."
+        },
+        "speakOff": {
+          "description": "Prononce un texte lorsque l'appareil passe à Off."
+        },
+        "gotoslide": {
+          "description": "Passe à cet écran lorsque l'appareil change."
+        },
+        "gotoslideOn": {
+          "description": "Passe à cet écran lorsque l'appareil passe à On."
+        },
+        "gotoslideOff": {
+          "description": "Passe à cet écran lorsque l'appareil passe à Off."
+        },
+        "openpopup": {
+          "description": "Ouvre un popup configuré lorsque l'appareil change."
+        },
+        "openpopupOn": {
+          "description": "Ouvre un popup configuré lorsque l'appareil passe à On."
+        },
+        "openpopupOff": {
+          "description": "Ouvre un popup configuré lorsque l'appareil passe à Off."
+        },
+        "popup": {
+          "description": "Utilise une définition de popup configurée pour ce bloc."
+        },
+        "graph": {
+          "description": "Active ou désactive le graphique au clic pour les appareils pris en charge."
+        },
+        "url": {
+          "description": "URL ouverte lors d'un clic sur un bloc pris en charge."
+        },
+        "newwindow": {
+          "description": "Mode de clic sur l'URL : 0 même fenêtre, 1 onglet, 2 cadre, 3 GET, 4 POST, 5 fenêtre."
+        },
+        "backgroundimage": {
+          "description": "URL de l'image d'arrière-plan ou idx d'un appareil texte Domoticz contenant l'URL."
+        },
+        "backgroundsize": {
+          "description": "Dimensionnement de l'arrière-plan, par exemple cover, contain ou 80 %."
+        },
+        "backgroundopacity": {
+          "description": "Opacité de l'image d'arrière-plan configurée."
+        },
+        "colorpicker": {
+          "description": "Mode du sélecteur de couleur RVB : 0 désactivé, 1 ancien style, 2 nouveau style."
+        },
+        "colorpickerscale": {
+          "description": "Échelle relative du sélecteur de couleur en mode 2."
+        },
+        "mode": {
+          "description": "Mode propre à l'appareil ; à utiliser uniquement si la documentation du bloc concerné l'exige."
+        },
+        "switchMode": {
+          "description": "Pour les appareils RVB pris en charge, ouvre le sélecteur de couleur au lieu de basculer On/Off."
+        }
+      }
+    },
+    "customfieldsetoptions": {
+      "title": "Valeurs possibles",
+      "strictHint": "Choisissez l’une de ces valeurs prises en charge.",
+      "freeHint": "Valeurs suggérées. Vous pouvez aussi saisir une autre valeur valide.",
+      "current": "Actuelle",
+      "exampleValue": "Exemple de valeur",
+      "options": {
+        "hideimageonempty": [
+          {
+            "value": "true",
+            "description": "Masquer l'image si Data est vide"
+          },
+          {
+            "value": "false",
+            "description": "Toujours afficher l'image"
+          }
+        ],
+        "multi_line": [
+          {
+            "value": "true",
+            "description": "Afficher les valeurs sur des lignes séparées"
+          },
+          {
+            "value": "false",
+            "description": "Ne pas forcer plusieurs lignes"
+          }
+        ],
+        "single_line": [
+          {
+            "value": "true",
+            "description": "Afficher les valeurs sur une seule ligne"
+          },
+          {
+            "value": "false",
+            "description": "Ne pas forcer une seule ligne"
+          }
+        ],
+        "hide_stop": [
+          {
+            "value": "true",
+            "description": "Masquer le bouton Stop"
+          },
+          {
+            "value": "false",
+            "description": "Afficher le bouton Stop"
+          }
+        ],
+        "protected": [
+          {
+            "value": "true",
+            "description": "Empêcher la commande manuelle"
+          },
+          {
+            "value": "false",
+            "description": "Autoriser la commande manuelle"
+          }
+        ],
+        "graph": [
+          {
+            "value": "true",
+            "description": "Activer le graphique"
+          },
+          {
+            "value": "false",
+            "description": "Désactiver le graphique"
+          }
+        ],
+        "confirmation": [
+          {
+            "value": "0",
+            "description": "Aucune confirmation"
+          },
+          {
+            "value": "1",
+            "description": "Demander avant de commuter"
+          }
+        ],
+        "sortorder": [
+          {
+            "value": "-1",
+            "description": "Décroissant"
+          },
+          {
+            "value": "0",
+            "description": "Aucun tri"
+          },
+          {
+            "value": "1",
+            "description": "Croissant"
+          }
+        ],
+        "showsubtitles": [
+          {
+            "value": "0",
+            "description": "Masquer les sous-titres"
+          },
+          {
+            "value": "1",
+            "description": "Afficher le sous-titre avec le titre"
+          },
+          {
+            "value": "2",
+            "description": "Afficher le sous-titre avec la valeur"
+          }
+        ],
+        "newwindow": [
+          {
+            "value": "0",
+            "description": "Ouvrir dans la fenêtre actuelle"
+          },
+          {
+            "value": "1",
+            "description": "Ouvrir dans un nouvel onglet"
+          },
+          {
+            "value": "2",
+            "description": "Ouvrir dans un popup/cadre"
+          },
+          {
+            "value": "3",
+            "description": "HTTP GET sans fenêtre"
+          },
+          {
+            "value": "4",
+            "description": "HTTP POST sans fenêtre"
+          },
+          {
+            "value": "5",
+            "description": "Ouvrir dans une fenêtre de navigateur séparée"
+          }
+        ],
+        "colorpicker": [
+          {
+            "value": "0",
+            "description": "Désactivé"
+          },
+          {
+            "value": "1",
+            "description": "Ancien sélecteur de couleur"
+          },
+          {
+            "value": "2",
+            "description": "Nouveau sélecteur de couleur"
+          }
+        ],
+        "switchmode": [
+          {
+            "value": "color",
+            "description": "Ouvrir le sélecteur de couleur au lieu de On/Off"
+          }
+        ],
+        "backgroundsize": [
+          {
+            "value": "cover",
+            "description": "Remplir tout le bloc"
+          },
+          {
+            "value": "contain",
+            "description": "Faire tenir toute l'image dans le bloc"
+          },
+          {
+            "value": "80%",
+            "description": "Exemple de pourcentage personnalisé"
+          },
+          {
+            "value": "100%",
+            "description": "Exemple de pourcentage original/complet"
+          }
+        ],
+        "backgroundopacity": [
+          {
+            "value": "1",
+            "description": "100 % visible"
+          },
+          {
+            "value": "0.75",
+            "description": "75 % visible"
+          },
+          {
+            "value": "0.5",
+            "description": "50 % visible"
+          },
+          {
+            "value": "0.25",
+            "description": "25 % visible"
+          },
+          {
+            "value": "0",
+            "description": "Transparent"
+          }
+        ],
+        "colorpickerscale": [
+          {
+            "value": "1",
+            "description": "100 %"
+          },
+          {
+            "value": "1.25",
+            "description": "125 %"
+          },
+          {
+            "value": "1.5",
+            "description": "150 %"
+          },
+          {
+            "value": "2",
+            "description": "200 %"
+          }
+        ],
+        "decimals": [
+          {
+            "value": "0",
+            "description": "Aucune décimale"
+          },
+          {
+            "value": "1",
+            "description": "Une décimale"
+          },
+          {
+            "value": "2",
+            "description": "Deux décimales"
+          },
+          {
+            "value": "3",
+            "description": "Trois décimales"
+          }
+        ],
+        "batterythreshold": [
+          {
+            "value": "10",
+            "description": "Avertir sous 10 %"
+          },
+          {
+            "value": "15",
+            "description": "Avertir sous 15 %"
+          },
+          {
+            "value": "20",
+            "description": "Avertir sous 20 %"
+          },
+          {
+            "value": "30",
+            "description": "Seuil courant/par défaut"
+          }
+        ],
+        "flash": [
+          {
+            "value": "0",
+            "description": "Pas de clignotement"
+          },
+          {
+            "value": "250",
+            "description": "250 ms"
+          },
+          {
+            "value": "500",
+            "description": "500 ms"
+          },
+          {
+            "value": "1000",
+            "description": "1000 ms"
+          }
+        ],
+        "scale": [
+          {
+            "value": "0.001",
+            "description": "Diviser par 1000"
+          },
+          {
+            "value": "0.01",
+            "description": "Diviser par 100"
+          },
+          {
+            "value": "0.1",
+            "description": "Diviser par 10"
+          },
+          {
+            "value": "1",
+            "description": "Aucune mise à l'échelle"
+          },
+          {
+            "value": "10",
+            "description": "Multiplier par 10"
+          },
+          {
+            "value": "100",
+            "description": "Multiplier par 100"
+          },
+          {
+            "value": "1000",
+            "description": "Multiplier par 1000"
+          }
+        ],
+        "mode": [
+          {
+            "value": "1",
+            "description": "Exemple : mode 1 propre à l'appareil"
+          }
+        ],
+        "texton": [
+          {
+            "value": "On",
+            "description": "Exemple de texte On"
+          },
+          {
+            "value": "Aan",
+            "description": "Exemple néerlandais"
+          },
+          {
+            "value": "Open",
+            "description": "Exemple de texte d'état"
+          }
+        ],
+        "textoff": [
+          {
+            "value": "Off",
+            "description": "Exemple de texte Off"
+          },
+          {
+            "value": "Uit",
+            "description": "Exemple néerlandais"
+          },
+          {
+            "value": "Closed",
+            "description": "Exemple de texte d'état"
+          },
+          {
+            "value": "Dicht",
+            "description": "Exemple d'état en néerlandais"
+          }
+        ],
+        "unit": [
+          {
+            "value": "°C",
+            "description": "Température"
+          },
+          {
+            "value": "%",
+            "description": "Pourcentage"
+          },
+          {
+            "value": "W",
+            "description": "Watt"
+          },
+          {
+            "value": "kW",
+            "description": "Kilowatt"
+          },
+          {
+            "value": "V",
+            "description": "Volt"
+          },
+          {
+            "value": "A",
+            "description": "Ampère"
+          }
+        ]
+      }
+    },
+    "postnl": {
+      "title": "PostNL",
+      "postnl_username": "Adresse e-mail PostNL",
+      "postnl_password": "Mot de passe PostNL",
+      "postnl_showdelivered": "Afficher les colis livrés",
+      "postnl_days": "Afficher les livrés pendant (jours)",
+      "postnl_days_help": "Nombre de jours pendant lesquels un colis reste visible après la livraison. Par défaut : 2.",
+      "postnl_pollminutes": "Intervalle d’interrogation (minutes)",
+      "postnl_fontsize": "Taille de police (px)",
+      "postnl_fontsize_help": "Taille de police du texte des envois. Par défaut : 14.",
+      "postnl_date_color": "Couleur de la date",
+      "postnl_time_color": "Couleur de l’heure",
+      "postnl_text_color": "Couleur du texte",
+      "postnl_iconstyle": "Style d’icône",
+      "postnl_iconstyle_fa": "Font Awesome",
+      "postnl_iconstyle_emoji": "Emoji (en couleur)",
+      "postnl_pollminutes_help": "Minimum 15 minutes, pour éviter que votre compte PostNL soit signalé. Par défaut : 60."
+    },
+    "hpilo": {
+      "title": "HP iLO",
+      "hpilo_host": "Adresse IP / nom d’hôte de l’iLO",
+      "hpilo_port": "Port",
+      "hpilo_port_help": "Port HTTPS de l’iLO. Par défaut : 443.",
+      "hpilo_username": "Nom d’utilisateur",
+      "hpilo_password": "Mot de passe",
+      "hpilo_pollseconds": "Intervalle d’interrogation (s)",
+      "hpilo_pollseconds_help": "Minimum 30 secondes ; l’iLO est un processeur de gestion lent. Par défaut : 300.",
+      "hpilo_fontsize": "Taille de police (px)",
+      "hpilo_fontsize_help": "Taille de police des lignes. Par défaut : 14.",
+      "hpilo_rows": "Lignes",
+      "hpilo_rows_select": "Choisir une ligne",
+      "hpilo_rows_help": "Choisissez une ligne et cliquez sur + pour l’ajouter. L’ordre ci-dessous est l’ordre sur la tuile.",
+      "hpilo_rows_none": "Aucune ligne ajoutée.",
+      "hpilo_rows_drag": "Glisser pour réorganiser",
+      "hpilo_rows_remove": "Supprimer",
+      "hpilo_row_icon": "Icône de cette ligne",
+      "hpilo_icon_default": "Par défaut",
+      "hpilo_icon_none": "Aucune"
+    },
+    "devicerules": {
+      "automation": "Automatisation",
+      "help": "Évalue un déclencheur puis exécute les actions activées. Le CSS s’applique à cet appareil ; l’action texte remplit le champ données/valeur d’un appareil cible choisi.",
+      "enabled": "Activé",
+      "trigger": "Déclencheur",
+      "actions": "Actions",
+      "property": "Statut / propriété",
+      "condition": "Condition",
+      "value": "Valeur",
+      "cssAction": "Ajouter du CSS à l’appareil actuel",
+      "cssActionHelp": "La classe générée est automatiquement ajoutée à l’appareil dont la fenêtre de configuration est ouverte, puis retirée.",
+      "currentDevice": "Appareil actuel",
+      "textAction": "Placer du texte dans un autre appareil",
+      "textTarget": "Appareil cible de l’action texte",
+      "targetHelp": "La liste déroulante affiche les appareils configurés disponibles avec leur nom, IDX et clé de bloc. Le texte de plusieurs automatisations ayant la même cible est automatiquement affiché sur des lignes séparées ; les appareils Texte sont listés en premier.",
+      "textOn": "Texte si vrai",
+      "textOff": "Texte si faux",
+      "textCssAction": "Appliquer aussi du CSS à l’appareil cible",
+      "textCssActionHelp": "La classe générée est ajoutée à l’appareil cible de l’action texte, puis retirée, en même temps que le déclencheur. Visible uniquement si l’action texte est activée.",
+      "cssClass": "Classe CSS",
+      "styling": "Style",
+      "existingCss": "CSS existant / classe uniquement",
+      "background": "Arrière-plan",
+      "border": "Bordure",
+      "textColor": "Couleur du texte",
+      "backgroundColor": "Couleur d’arrière-plan",
+      "opacity": "Opacité",
+      "borderWidth": "Épaisseur de bordure",
+      "borderStyle": "Style de bordure",
+      "borderColor": "Couleur de bordure",
+      "bannerText": "Texte de la bannière",
+      "bannerTop": "Distance depuis le haut (px)",
+      "fontSize": "Taille de police (px)",
+      "legacyTarget": "Cible CSS existante (compatibilité)",
+      "legacyTargetHelp": "Cette ancienne règle pointe vers un autre bloc. Laissez-la inchangée pour conserver l’ancien comportement, ou choisissez Cet appareil.",
+      "selfTarget": "Cet appareil",
+      "advancedCss": "Options CSS avancées",
+      "remove": "Supprimer",
+      "addRule": "Ajouter une automatisation",
+      "noRules": "Aucune automatisation configurée.",
+      "advanced": "Avancé",
+      "handler": "Gestionnaire JS personnalisé",
+      "handlerHelp": "Facultatif : relie cet appareil à getStatus_<nom>(block, afterupdate) dans custom.js.",
+      "invalidTrigger": "Automatisation : remplissez Statut/propriété, Condition et Valeur du déclencheur.",
+      "invalidActions": "Automatisation : activez au moins une action.",
+      "invalidTextRule": "Automatisation : choisissez un appareil cible pour l’action texte.",
+      "invalidTextValue": "Automatisation : saisissez un texte pour le résultat vrai et/ou faux.",
+      "invalidBannerText": "Automatisation : saisissez un texte de bannière sans guillemets ni barres obliques inverses.",
+      "invalidClass": "Automatisation : utilisez une classe CSS valide (lettres, chiffres, _ et -).",
+      "invalidHandler": "Automatisation : le gestionnaire JS personnalisé peut contenir des lettres, des chiffres, _ et $ et ne peut pas commencer par un chiffre.",
+      "cssSaving": "Enregistrement de l’automatisation dans custom.js / custom.css...",
+      "cssSaveFailed": "Automatisation : impossible de mettre à jour custom.js / custom.css.",
+      "source": "Bloc source",
+      "textDevices": "Appareils Texte",
+      "otherBlocks": "Autres appareils disponibles",
+      "unavailableTarget": "Plus disponible"
     }
   },
   "switches": {

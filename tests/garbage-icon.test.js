@@ -43,8 +43,13 @@ test('Garbage icon and Kliko layout enhancements stay available', () => {
   );
   assert.match(
     helper,
-    /setProperty\('left', '70px', 'important'\)/,
-    'the Kliko image must be shifted 70px to the right'
+    /if \(hasNonDefaultTheme\(\)\) \{[^}]*setProperty\('left', '70px', 'important'\)/,
+    'the Kliko image is only shifted 70px to the right in non-default themes'
+  );
+  assert.match(
+    helper,
+    /removeProperty\('left'\)/,
+    'the default theme must not shift the Kliko image'
   );
   assert.match(
     helper,
@@ -73,7 +78,7 @@ test('Garbage icon and Kliko layout enhancements stay available', () => {
   );
   assert.match(
     index,
-    /<script src="js\/garbageconfig\.js\?t=7"><\/script>/,
+    /'js\/garbageconfig\.js'\][\s\S]*src \+ '\?t=' \+ bust/,
     'the updated Garbage helper must be loaded with a fresh cache key'
   );
 });

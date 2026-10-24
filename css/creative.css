@@ -23,6 +23,12 @@
   --text-inactive: rgba(255, 255, 255, 0.5);
   --warning-red: red;
   --success-green: green;
+  /* Status colours of the widgets (PostNL, HP iLO, TVgids, F1); a theme can
+     override them. */
+  --dt-ok: #2e9e5b;
+  --dt-info: #3a86d8;
+  --dt-warn: #e0a800;
+  --dt-error: #d9534f;
   --selector-bg: #292b2c;
   --blocktitle: rgba(0, 0, 0, 0.5);
   --panel-shadow: 0 6px 18px rgba(0, 0, 0, 0.38);
@@ -336,10 +342,70 @@
 .dt_block {
   display: flex;
   align-items: flex-start;
+  position: relative;
   background: var(--main-bg);
   background-clip: padding-box;
   border: var(--block-gap) solid var(--border-color-block);
   padding: 5px !important;
+  transition: border-color 0.2s ease;
+}
+
+/* Same shine-sweep hover as the Screen Editor's own Add-items tiles
+   (.dt-screeneditor-add-tile below), but themed instead of hardcoded:
+   var(--button-active)/var(--border-color-active) already vary per theme
+   (see e.g. themes/modern-dark, themes/liquid-glass-*), the same pair an
+   active/pressed .transbg button already uses further down. Implemented
+   as a second background layer with an animated background-position,
+   not a translated element, on purpose: .dt_block hosts every kind of
+   block (dials, graphs, dropdowns, camera popups, ...) and some rely on
+   their own content overflowing its box, so this must never need
+   `overflow: hidden` on .dt_block itself - a background is always
+   clipped to the element's own box regardless of that element's own
+   overflow setting, unlike the add-tile's translated ::before, which
+   only stays inside its tile because that tile sets overflow: hidden
+   itself (safe there - an Add-items tile has no overflowing content).
+
+   background-position on a background-size: 200% image moves at
+   (1 - 2) * pct/100 = -pct/100 box-widths, i.e. a full box-width per 100
+   points of position change - a naive "0% -> -100% -> back" (mirroring
+   the add-tile's own -120%/120% *element position* numbers directly)
+   sweeps the band past the visible viewport in a fraction of the
+   transition (confirmed empirically: only ~1/7th of the transition
+   actually showed it, far too fast to see). -50% -> 150% keeps the band
+   (42%-58% of the image) fully hidden at both ends while still crossing
+   the viewport for ~60% of the transition's own duration - recompute
+   both numbers together if the band width or background-size changes. */
+.dt_block::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    100deg,
+    transparent 42%,
+    var(--dt-block-shine, var(--button-active)) 50%,
+    transparent 58%
+  );
+  background-repeat: no-repeat;
+  background-size: 200% 100%;
+  background-position: -50% 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dt_block:hover {
+    border-color: var(--border-color-active);
+  }
+
+  .dt_block:hover::before {
+    background-position: 150% 0;
+    /* ease-out already keeps the sweep starting immediately (its steepest
+       point is right at the start) - only the duration governs how long
+       the glow stays visible while crossing the tile before it's swept
+       past and gone again. 0.45s made that crossing read as too fast
+       ("start is goed, maar het is nu te snel weg"); 0.9s keeps the same
+       immediate start but roughly doubles how long it lingers. */
+    transition: background-position 0.9s ease-out;
+  }
 }
 
 /* dirty fix for group component ... */
@@ -360,6 +426,25 @@
 .dt_content {
   width: 100%;
   margin: 0px 0px;
+}
+
+/* .dt_column (template: 1, js/dashticz.js's getSpecialBlock()) renders
+   .dt_state as a sibling of .dt_content instead of nested inside it, so it
+   becomes a flex item of .dt_block directly. .dt_block's align-items:
+   flex-start (needed so .col-icon/.dt_content top-align in the normal row
+   layout) then also governs .dt_column's cross axis, which is horizontal in
+   column mode - so without an override, .dt_state shrinks to its content's
+   own width instead of filling the block like .dt_content already does
+   above, and any right-aligned content inside it (e.g. Cluster's
+   switchRowHtml, css/creative.css's .cluster-row) sits against that
+   shrunk-to-fit edge rather than the block's true right edge.
+   align-self: stretch, not width: 100% - .dt_state already carries its own
+   margin: 5px 5px (below), and a stretched flex item's margin box (not its
+   border box) is what fills the line, so stretch keeps that 5px margin on
+   both sides. width: 100% would ignore the margin and add it on top,
+   overflowing the block by 5px on the right. */
+.dt_column > .dt_state {
+  align-self: stretch;
 }
 
 .fixedheight:not(.dt_column) .dt_content {
@@ -836,7 +921,7 @@ next css sets the default height of the frame popup
 
 .settings-update-label {
   margin: 0;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -938,7 +1023,7 @@ next css sets the default height of the frame popup
   margin: 18px 0 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
   color: #495057;
   letter-spacing: 0.03em;
@@ -1051,7 +1136,7 @@ next css sets the default height of the frame popup
 
 .settings-cssvar-px-suffix {
   color: #6c757d;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 @media (max-width: 767.98px) {
@@ -1072,6 +1157,47 @@ next css sets the default height of the frame popup
   min-height: 42px;
   padding: 3px 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.055);
+}
+
+/* Config menu, tabs General and Display: the rows are laid out in two
+   columns. Per row the info icon sits between the label and the field, and
+   the fields are about 30 characters wide instead of 40. */
+.settings-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+
+.settings-two-col .settings-static {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 991.98px) {
+  .settings-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 768px) {
+  .settings-two-col .settings-row {
+    grid-template-columns: minmax(0, 1fr) 26px minmax(0, 30ch);
+  }
+
+  .settings-two-col .settings-row .settings-help-slot {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .settings-two-col .settings-row .settings-control {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  #settingspopup .settings-two-col .settings-control .form-control,
+  #settingspopup .settings-two-col .settings-control .form-select {
+    width: 30ch;
+    max-width: 100%;
+  }
 }
 
 .settings-label {
@@ -1220,7 +1346,7 @@ next css sets the default height of the frame popup
 .settings-static {
   padding: 12px 0;
   color: #343a40;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 @media (max-width: 767.98px) {
@@ -1539,6 +1665,11 @@ next css sets the default height of the frame popup
   text-overflow: ellipsis;
 }
 
+.colbar.transbg .logo .logo-version {
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .colbar.transbg .fab,
 .colbar.transbg .fas,
 .colbar.transbg .far {
@@ -1560,26 +1691,60 @@ next css sets the default height of the frame popup
 /* Screen Editor add menu */
 .dt-screeneditor-add-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(100px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(76px, 1fr));
+  gap: 10px;
 }
 
 .dt-screeneditor-add-tile {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-width: 100px;
-  min-height: 100px;
+  min-width: 76px;
+  min-height: 76px;
   aspect-ratio: 1 / 1;
-  padding: 12px 8px;
+  padding: 8px 6px;
   border: 1px solid #ced4da;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #f8f9fa;
   color: #212529;
   text-align: center;
   cursor: pointer;
+}
+
+.dt-screeneditor-add-tile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 60%;
+  height: 100%;
+  transform: skewX(-20deg);
+  /* The tile's own background (#f8f9fa, #eef5ff on hover) is already very
+     light, so the originally-requested rgba(237,233,224,0.25) had almost no
+     luminance difference to read against it - confirmed invisible in a
+     screenshot scan across the full sweep. A brighter, more opaque white
+     keeps the same diagonal-sweep shape but actually shows up here. */
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.85),
+    transparent
+  );
+}
+
+.dt-screeneditor-add-tile:hover::before {
+  left: 120%;
+  /* The original cubic-bezier(0.65, 0, 0.35, 1) keeps the animated value
+     near its start for roughly the first quarter of the transition, which
+     reads as a delay before the sweep appears - confirmed with screenshots
+     at 50ms steps showing nothing moving until ~250ms in. ease-out starts
+     moving immediately instead, and a shorter duration makes the whole
+     sweep feel snappy rather than a slow drift. */
+  transition: left 0.45s ease-out;
 }
 
 .dt-screeneditor-add-tile:hover,
@@ -1590,12 +1755,12 @@ next css sets the default height of the frame popup
 }
 
 .dt-screeneditor-add-tile i {
-  margin: 0 0 8px !important;
-  font-size: 28px !important;
+  margin: 0 0 6px !important;
+  font-size: 22px !important;
 }
 
 .dt-screeneditor-add-tile span {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -1647,7 +1812,7 @@ next css sets the default height of the frame popup
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.35);
   color: var(--text-light);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -1703,7 +1868,7 @@ next css sets the default height of the frame popup
 /* Font Awesome icons inside screen-switcher buttons */
 .dt-screen-btn i[aria-hidden] {
   pointer-events: none;
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -2008,7 +2173,7 @@ body.dle-active {
 .dle-pending-name {
   max-width: 100%;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2046,13 +2211,34 @@ body.dle-active {
 }
 
 /* -- Device Editor modal --------------------------------------- */
-.de-section-title {
+/* Group heading above a set of fields, in Device Config, Widget Config
+   (js/widgeteditor.js _cfgHeading()) and their helpers (Garbage, LMS,
+   Automation): one uniform style - bold on a light grey band, with a bit
+   more room above it than between the fields themselves. h6 + !important
+   so it also wins over the mt-3 some of these headings still carry. */
+h6.de-section-title {
+  margin: 22px 0 8px !important;
+  padding: 5px 8px;
   font-weight: 600;
   font-size: 14px;
   color: #343a40;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #dee2e6;
-  margin-bottom: 8px;
+  background: var(--bs-secondary-bg, #e9ecef);
+  border: 0;
+  border-radius: var(--bs-border-radius, 0.375rem);
+}
+
+/* Icons inside a heading (e.g. Automation's bolt) stay text-sized instead of
+   the global 30px .fas size. */
+h6.de-section-title .fas {
+  font-size: 1em !important;
+  line-height: 1;
+}
+
+/* Only the popup's very first heading sits flush at the top; a heading
+   that merely opens its own sub-section (e.g. Garbage's Text styling)
+   keeps the extra room above it. */
+.modal-body > h6.de-section-title:first-child {
+  margin-top: 0 !important;
 }
 
 .de-device-list {
@@ -2072,7 +2258,7 @@ body.dle-active {
   border-radius: 4px;
   background: #f8f9fa;
   border: 1px solid #e9ecef;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .de-device-identity {
@@ -2147,6 +2333,39 @@ body.dle-active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Cluster popup pending-device row: an editable name (defaults to the
+   device's own Domoticz name via its placeholder) plus its IDX, and - in
+   Switch mode - a companion "consumption" device <select>, all between the
+   remove button and the row's edge. The name group needs to actually
+   shrink (a flex item's default min-width:auto ignores overflow:hidden/
+   text-overflow otherwise) instead of pushing everything else off the
+   edge of the row. */
+.cl-pending-name-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cl-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cl-pending-idx {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cl-usage-select {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 180px;
 }
 
 .de-device-type {
@@ -2233,6 +2452,189 @@ body.dle-active {
   line-height: 1;
 }
 
+/* Device Config -> Text: the size inputs and the alignment buttons share
+   one height; the buttons are square and their icons scale with them
+   (instead of the global 30px .fas size). */
+.de-text-style-row .form-control-sm {
+  height: 2.125rem;
+}
+
+.de-text-align-group .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.125rem;
+  height: 2.125rem;
+  padding: 0;
+}
+
+.de-text-align-group .fas {
+  margin: 0 !important;
+  font-size: 1.05rem !important;
+  line-height: 1;
+}
+
+/* Automation (js/devicerules.js switchBlockHtml()): the input fields sit
+   next to their switch. Drop the switch by one small label line so it lines
+   up with the inputs instead of their labels, unless the fields are hidden
+   because the switch is off. */
+/* Green action buttons (Automation "Add automation", LMS "Test
+   connection"): semi-transparent so they also fit dark mode. The icon is
+   kept at text size (the global .fas rule makes it 30px) and centered with
+   the label. */
+.btn.dt-btn-green {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--bs-success-text-emphasis, #0a3622);
+  background-color: rgba(25, 135, 84, 0.3);
+  border-color: rgba(25, 135, 84, 0.55);
+}
+
+.btn.dt-btn-green:hover,
+.btn.dt-btn-green:focus-visible {
+  color: var(--bs-success-text-emphasis, #0a3622);
+  background-color: rgba(25, 135, 84, 0.45);
+  border-color: rgba(25, 135, 84, 0.7);
+}
+
+.btn.dt-btn-green .fas {
+  margin: 0 !important;
+  font-size: 1em !important;
+  line-height: 1;
+}
+
+/* LMS Device Config: Server/IP + Port and Username + Password pairs, two
+   equal-width fields 10px apart, stacked on a narrow popup. Own flex row
+   instead of Bootstrap's .row/.col grid, which Dashticz's own grid CSS
+   changes. */
+.de-lms-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.de-lms-pair > * {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+/* LMS Device Config: Hide-when-off and Player controls (js/lmsconfig.js)
+   switches side by side, wrapping on a narrow popup. */
+.de-lms-switches {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1.5rem;
+  row-gap: 0.5rem;
+}
+
+.de-lms-switches > .form-switch {
+  margin-bottom: 0;
+}
+
+.de-lms-switches .form-check-label {
+  margin-left: 5px;
+}
+
+/* Automation rule remove (trash) button: a text-sized icon, like the other
+   small buttons in the popup. */
+.dt-device-rule .dr-remove .fas {
+  margin: 0 !important;
+  font-size: 1em !important;
+  line-height: 1;
+}
+
+/* Automation rule/action card title line (js/devicerules.js): a grey band
+   across the full card width so the title stands out from the fields.
+   The negative margins cancel the card's p-2 padding. */
+.dr-card-header {
+  margin: -0.5rem -0.5rem 0.5rem;
+  padding: 0.3rem 0.5rem;
+  min-height: 2rem;
+  background: rgba(128, 128, 128, 0.18);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: var(--bs-border-radius) var(--bs-border-radius) 0 0;
+}
+
+/* Automation field rows (js/devicerules.js fieldHtml()): fields sit side
+   by side and wrap where the popup is too narrow. Fields without a size
+   class stay as narrow as their content (short selects, colors, numbers);
+   text fields grow into the remaining space. */
+.dr-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* One control height for every input, select and color swatch in a row,
+   so all labels and all controls line up. */
+.dr-fields .form-control-sm,
+.dr-fields .form-select-sm,
+.dr-fields .form-control-color {
+  height: 2.125rem;
+}
+
+.dr-fields .form-control-color {
+  width: 2.75rem;
+  padding: 0.2rem;
+}
+
+.dr-fields.dr-style-groups {
+  column-gap: 1.25rem;
+}
+
+.dr-field {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.dr-field.dr-field-grow {
+  flex: 1 1 8rem;
+}
+
+.dr-field.dr-field-wide {
+  flex: 1 1 12rem;
+}
+
+.dr-field.dr-field-full {
+  flex: 1 1 100%;
+}
+
+.dr-contents {
+  display: contents;
+}
+
+.dr-fields .dr-input-num {
+  width: 9ch;
+}
+
+/* Content-sized selects: keep room for the value next to the arrow, so a
+   short value such as "2 px" is never cut off. */
+.dr-fields .form-select.w-auto {
+  min-width: 5.5rem;
+}
+
+.dr-switch-row {
+  column-gap: calc(0.5rem + 10px);
+}
+
+.dr-switch-row > .min-w-0 {
+  min-width: 0;
+}
+
+.dr-switch-cell {
+  margin: 2rem 0 0;
+}
+
+.dr-switch-cell.dr-switch-cell-deep {
+  margin-top: 3.5625rem;
+}
+
+.dr-switch-row:has(> .d-none) .dr-switch-cell.dr-switch-cell {
+  margin-top: 0;
+}
+
 .de-config-popup {
   z-index: 1070;
 }
@@ -2307,6 +2709,52 @@ body.dle-active {
 .de-custom-field-row .form-control,
 .we-custom-field-row .form-control {
   min-width: 0;
+}
+
+/* Field column has one fixed share of the row, whether it is a text input
+   or the Icon/Image pulldown - a select otherwise claims its own content
+   width (plus its arrow padding) and pushes its Setting column out of line
+   with the rows around it. Setting fills the rest; nowrap keeps the +/-
+   buttons on the row (the phone-width media query below turns wrapping
+   back on). */
+.de-custom-field-row,
+.we-custom-field-row {
+  flex-wrap: nowrap;
+}
+
+.de-custom-field-row .de-custom-field-name,
+.we-custom-field-row .we-custom-field-name {
+  flex: 0 0 45%;
+  width: auto;
+  min-width: 0;
+}
+
+.de-custom-field-row .de-custom-field-setting,
+.we-custom-field-row .we-custom-field-setting {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+/* +/- buttons: text-sized icons instead of the global 30px .fas size, so
+   the rows stay as compact as the -sm inputs next to them. */
+.de-custom-field-row .btn .fas,
+.we-custom-field-row .btn .fas {
+  margin: 0 !important;
+  font-size: 1em !important;
+  line-height: 1;
+}
+
+/* Stretch the Icon/Image pulldown to the row's height, like the text
+   inputs next to it already do - a fixed height left it shorter than rows
+   made taller by the +/- button icons. */
+.de-custom-field-row .de-icon-source,
+.we-custom-field-row .we-icon-source {
+  height: auto;
+  align-self: stretch;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.2;
 }
 
 .de-icon-field-row,
@@ -2388,7 +2836,7 @@ body.dle-active {
 
 @media (max-width: 575.98px) {
   .dt-screeneditor-add-grid {
-    grid-template-columns: repeat(2, minmax(100px, 1fr));
+    grid-template-columns: repeat(3, minmax(76px, 1fr));
   }
 
   .de-custom-field-row,
@@ -2470,7 +2918,7 @@ body.dle-active {
 
 .de-add-row .de-device-select {
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .de-add-row .de-width-input {
@@ -2496,7 +2944,7 @@ body.dle-active {
 }
 
 .de-empty {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text-muted);
   font-style: italic;
   padding: 4px 0;
@@ -2547,15 +2995,21 @@ body.dle-active {
 
 .we-widget-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 767.98px) {
+  .we-widget-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .we-widget-card {
   position: relative;
   display: flex;
-  min-height: 180px;
-  padding: 18px 16px 38px;
+  min-height: 150px;
+  padding: 14px 12px 34px;
   color: #212529;
   background: #f8f9fa;
   border: 2px solid #dee2e6;
@@ -2580,10 +3034,10 @@ body.dle-active {
 }
 
 .we-widget-icon {
-  flex: 0 0 56px;
+  flex: 0 0 40px;
   padding-top: 2px;
   color: #0d6efd;
-  font-size: 38px;
+  font-size: 28px;
   line-height: 1;
   text-align: center;
 }
@@ -2595,19 +3049,20 @@ body.dle-active {
 .we-widget-content {
   flex: 1 1 auto;
   min-width: 0;
-  padding-left: 12px;
+  padding-left: 8px;
 }
 
 .we-widget-title {
-  margin-bottom: 5px;
-  font-size: 18px;
+  margin-bottom: 4px;
+  padding-right: 22px;
+  font-size: 16px;
   font-weight: 700;
 }
 
 .we-widget-description {
-  min-height: 42px;
+  min-height: 36px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -2689,8 +3144,118 @@ body.dle-active {
   column-gap: 16px;
 }
 
-.we-switch-grid .mb-3 {
-  margin-bottom: 0.75rem;
+.we-switch-grid.we-switch-grid-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Device Config / F1 quick-add -> F1 section (js/deviceeditor.js
+   _f1FieldsHtml()): two columns, one on a phone; image and calendar URLs
+   span both. */
+.de-f1-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.de-f1-grid > .de-f1-field-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 575px) {
+  .de-f1-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Widget Config -> Settings (js/widgeteditor.js _buildConfigModalHtml()):
+   one shared two-column grid for every widget's own fields, one column on a
+   phone. Headings, help paragraphs, lists, add buttons and the existing
+   multi-column rows (.we-cfg-cols, switch grids, .we-cfg-inline) span the
+   full width; a section wrapper (e.g. Weather's per-provider group) spans
+   the full width and repeats the same two columns inside. */
+.we-settings-grid,
+.we-settings-grid > .we-weather-group,
+.we-settings-grid > .we-clock-group,
+.we-settings-grid > .we-clock-size-group,
+.we-settings-grid > .we-traffic-group,
+.we-row-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.we-settings-grid > :not(.we-cfg-field),
+.we-settings-grid > div > h6,
+.we-settings-grid > div > p {
+  grid-column: 1 / -1;
+}
+
+/* Every Widget Config popup is one fixed width (modal-lg), instead of
+   shrinking to its content - a widget with few or short fields was
+   narrower than the others. */
+#we-config-popup .modal-dialog {
+  width: 100%;
+}
+
+.we-settings-grid > #we-hpilo-rows {
+  grid-column: 1 / -1;
+}
+
+/* Selects as wide as the inputs next to them, instead of the global
+   select { max-width: 90% } rule further down this file. */
+#we-config-popup .modal-body .form-select,
+#de-config-popup .modal-body .form-select {
+  max-width: 100%;
+}
+
+.we-settings-grid > .we-list-add {
+  justify-self: start;
+  margin-bottom: 6px;
+}
+
+@media (max-width: 575px) {
+  .we-settings-grid,
+  .we-settings-grid > .we-weather-group,
+  .we-settings-grid > .we-clock-group,
+  .we-settings-grid > .we-clock-size-group,
+  .we-settings-grid > .we-traffic-group,
+  .we-row-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Color swatches: the same height as the -sm inputs and selects next to
+   them (31px), in every Widget Config. */
+#we-config-popup .modal-body .form-control-color {
+  width: 3rem;
+  height: calc(0.875rem * 1.5 + 0.5rem + 2px);
+  padding: 0.2rem;
+}
+
+/* Repeatable-list buttons (Calendar, Camera, Radio, Timegraph, HP iLO):
+   text-sized icons instead of the global 30px .fas size, like the green
+   Add buttons and the Custom fields +/- buttons. */
+#we-config-popup .modal-body .btn:not(.we-block-option) .fas {
+  margin: 0 !important;
+  font-size: 1em !important;
+  line-height: 1;
+}
+
+/* One uniform, compact spacing between Widget Config fields
+   (js/widgeteditor.js _cfgField()), in every widget and layout (single
+   column, .we-cfg-cols, switch rows): 6px between fields, a tighter label
+   without the generic .we-field-label's own 10px top margin.
+   Beats the field's own Bootstrap mb-3 (!important), which is kept for
+   code that looks fields up by that class. */
+.we-cfg-field.mb-3 {
+  margin-bottom: 6px !important;
+}
+
+.we-cfg-field > .we-field-label {
+  margin-top: 0;
+  margin-bottom: 0.2rem;
 }
 
 .we-clock-preview {
@@ -2729,7 +3294,7 @@ body.dle-active {
 .we-message {
   min-height: 22px;
   margin-top: 12px;
-  font-size: 13px;
+  font-size: 16px;
 }
 
 a.playlist {
@@ -2875,6 +3440,16 @@ a.playlist {
   width: 30px;
   height: 100%;
   margin: auto;
+}
+
+/* Center the +/- (and chevron) symbols of the setpoint/blinds buttons both
+   horizontally and vertically inside their button. */
+.col-button1 .btn-number,
+.col-button2 .btn-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .col-dots {
@@ -3056,6 +3631,72 @@ a.playlist {
   white-space: nowrap;
 }
 
+/* Lux sun arc (read-only), see postHookLux in js/blocks.js */
+div.mh.lux-has-slider:not(.multiline) {
+  height: auto;
+  min-height: 85px;
+  flex-wrap: wrap;
+}
+
+.mh.dt_block.lux-has-slider {
+  padding-bottom: 6px !important;
+}
+
+.lux-slider {
+  clear: both;
+  flex: 0 0 100%;
+  width: 100%;
+  padding: 0 10px;
+  text-align: center;
+}
+
+.lux-arc {
+  position: relative;
+  width: 100%;
+  max-width: 130px;
+  margin: 0 auto;
+}
+
+.lux-arc svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.lux-arc-value {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4%;
+  font-size: 15px;
+  font-weight: bold;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.lux-has-value .col-data .value {
+  display: none;
+}
+
+.lux-arc-track,
+.lux-arc-fill {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.lux-arc-track {
+  stroke: rgba(125, 138, 163, 0.35);
+}
+
+.lux-arc-glow {
+  fill: rgba(255, 214, 0, 0.8);
+}
+
+.lux-arc-sun {
+  fill: #fff;
+}
 /*To change the default height of the graph popup adapt the height value in custom.css
   Example:
 .graphheight {
@@ -3801,7 +4442,7 @@ html .ui-button.ui-state-disabled:active {
 .navbar-default .nav > li > a:focus {
   text-transform: uppercase;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text-dark);
 }
 
@@ -3877,6 +4518,17 @@ img.icon {
 
 .mixed.icon {
   opacity: 1;
+}
+
+/* Reverse icon (block.reverseicon, Device Config -> Reverse): swap which
+   state dims the icon/image. Normally Off is dimmed; with the option the
+   icon is shown at full strength while Off and dimmed while On. */
+.dt-icon-reverse .off.icon {
+  opacity: 1 !important;
+}
+
+.dt-icon-reverse .on.icon {
+  opacity: 0.4 !important;
 }
 
 .blinds .fas.fa-arrow-up,
@@ -4199,15 +4851,18 @@ img.icon {
   bottom: -8px !important;
 }
 
-/* A small, plain button - not an oversized draggable circle. Width/height
-   !important: jQuery UI's own bundled default theme sizes the handle via
-   its own em-based rule (.ui-slider .ui-slider-handle), which these two
-   already outrank on specificity, but pin them anyway so the handle can
-   never end up non-square. jQuery UI positions the handle with "bottom:
-   value%", which places the handle's *bottom edge* (not its center) at
-   that percentage of the track - so without correction the round handle
-   visually sits half its own height too high compared to the tick marks,
-   which center on their percentage via transform: translateY(-50%) (see
+/* A rounded-rectangle handle spanning the full track width, not a small
+   round dot. left: 0/right: 0 with width: auto stretches it to the
+   track's own width instead of a fixed px size; border-radius stays a
+   flat 6px (not 50%, which would draw an ellipse instead of a
+   rectangle). height !important: jQuery UI's own bundled default
+   theme sizes the handle via its own em-based rule (.ui-slider
+   .ui-slider-handle), which this already outranks on specificity, but
+   pin it anyway. jQuery UI positions the handle with "bottom: value%",
+   which places the handle's *bottom edge* (not its center) at that
+   percentage of the track - so without correction the handle visually
+   sits half its own height too high compared to the tick marks, which
+   center on their percentage via transform: translateY(-50%) (see
    .slider-tick span below). margin-bottom: -8px (half the 16px handle
    height) shifts the handle back down so its *center* lands on the
    value's percentage, matching the ticks. The theme's own default
@@ -4228,16 +4883,17 @@ img.icon {
    slider's actual value. Resetting top/margin-top back to auto/0 hands
    vertical positioning back to jQuery UI's own "bottom" entirely. */
 .blinds-slider-wrap .slider .ui-slider-handle {
-  left: 50%;
+  left: 0 !important;
+  right: 0;
   top: auto !important;
-  width: 16px !important;
+  width: auto !important;
   height: 16px !important;
-  margin-left: -8px;
+  margin-left: 0;
   margin-top: 0 !important;
   margin-bottom: -8px !important;
-  border: 2px solid rgba(255, 255, 255, 0.85) !important;
-  border-radius: 50% !important;
-  background: #d9dde2 !important;
+  border: 1px solid rgba(255, 255, 255, 0.75) !important;
+  border-radius: 6px !important;
+  background: #234824 !important;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   cursor: grab;
 }
@@ -4309,6 +4965,326 @@ img.icon {
 .slider-tick-active span {
   color: #9ae58b;
   font-weight: 800;
+}
+
+/* Cluster (js/components/cluster.js): a fixed list of devices shown as
+   individually-switchable rows in one block, unlike Group's single
+   combined toggle. Deliberately plain/theme-neutral (unlike the blinds
+   slider handle above, this isn't themed per-theme) so it reads
+   consistently regardless of the active theme. Rows are painted into
+   .dt_state (js/dashticz.js's own content slot), so the block's configured
+   icon/.dt_title - painted once by the framework itself - stay untouched;
+   containerClass: 'cluster-block' (js/components/cluster.js) is only a
+   scoping hook here, same idea as e.g. .weather_1/.weather_2. */
+.cluster-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.cluster-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.cluster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Scales with --cluster-switch-scale (see .cluster-row-switch below) so
+     a bigger switch doesn't crowd into the usage text next to it. */
+  gap: calc(8px * var(--cluster-switch-scale, 1));
+}
+
+.cluster-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Same size as the block's own title (.dt_title), just not bold - per
+     user request. */
+  font-size: var(--font-device-title);
+  font-weight: normal;
+}
+
+/* Optional row icon (block.icons), the HP iLO look (.hpilo-icon). The size,
+   colour and margin repeat !important because themes size/colour some .fas
+   icons globally, and this file has per-icon margin offsets of its own
+   (.fas.fa-lightbulb, .fas.fa-bolt, .fas.fa-thermometer-half, .fas.fa-plug,
+   .fas.fa-microchip, ...) meant for the big tile icon - autoIcon()
+   (js/components/cluster.js) or a manually picked icon can easily reuse one
+   of those exact classes, and without this override a row using one of them
+   "jumps" a few px out of line with every other row's icon in the same
+   cluster. */
+.cluster-block .dt_state .cluster-row-icon {
+  flex: none;
+  width: 1.4em;
+  margin: 0 !important;
+  color: #3a86d8 !important;
+  font-size: var(--font-device-title, 1em) !important;
+  line-height: 1;
+  text-align: center;
+}
+
+.cluster-row-usage {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: var(--font-device-title);
+  color: var(--text-muted);
+}
+
+/* Temperature and Other mode's own row value (js/components/cluster.js) - unlike
+   the usage span, this is the row's primary value (there is no toggle
+   next to it), so it keeps its own status color instead of the muted one
+   .cluster-row-usage uses for its secondary annotation. */
+.cluster-row-temp {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: var(--font-device-title);
+  font-weight: 600;
+  color: var(--text-status);
+}
+
+.cluster-row-switch {
+  /* --cluster-switch-scale (default 1) resizes the whole switch - .cluster
+     -row-track/-thumb below scale their actual box size via calc() rather
+     than a transform: scale() on this element, so the row's own height
+     (flex align-items: center sizes to its tallest child) and the gap to
+     .cluster-row-usage (see .cluster-row above) grow with it too, instead
+     of the switch visually overlapping its neighbours while its layout
+     box stays the original size. Read with a var() fallback rather than
+     declared here: a declaration on this same selector would always win
+     over one set on an ancestor (custom.css, a theme, or .cluster-block
+     itself), regardless of specificity, which would make such overrides
+     silently do nothing. */
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cluster-row-switch .cluster-row-checkbox {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.cluster-row-track {
+  position: relative;
+  /* Wider than tall (66x30, vs. a more typical ~2:1 pill) so ON/OFF has
+     more breathing room next to the thumb and reads more easily. */
+  width: calc(66px * var(--cluster-switch-scale, 1));
+  height: calc(30px * var(--cluster-switch-scale, 1));
+  border-radius: 9999px;
+  background: var(--cluster-switch-off, rgba(255, 255, 255, 0.25));
+  border: calc(1px * var(--cluster-switch-scale, 1)) solid
+    var(--cluster-switch-border, rgba(255, 255, 255, 0.3));
+  box-shadow: inset 0 calc(1px * var(--cluster-switch-scale, 1))
+    calc(2px * var(--cluster-switch-scale, 1)) rgba(0, 0, 0, 0.15);
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.cluster-row-track::after {
+  content: 'OFF';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(7px * var(--cluster-switch-scale, 1));
+  display: flex;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: calc(10px * var(--cluster-switch-scale, 1));
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--cluster-switch-label, rgba(255, 255, 255, 0.7));
+}
+
+.cluster-row-thumb {
+  position: absolute;
+  top: calc(3px * var(--cluster-switch-scale, 1));
+  left: calc(3px * var(--cluster-switch-scale, 1));
+  width: calc(24px * var(--cluster-switch-scale, 1));
+  height: calc(24px * var(--cluster-switch-scale, 1));
+  border-radius: 50%;
+  background: var(--cluster-switch-thumb, #fff);
+  box-shadow:
+    0 calc(1px * var(--cluster-switch-scale, 1))
+      calc(3px * var(--cluster-switch-scale, 1)) rgba(0, 0, 0, 0.35),
+    0 0 0 calc(1px * var(--cluster-switch-scale, 1)) rgba(0, 0, 0, 0.04);
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.2s ease;
+}
+
+.cluster-row-checkbox:checked + .cluster-row-track {
+  /* A richer, slightly darker green than a plain #4cd964 keeps the white
+     ON label above legible (~3.3:1, enough for bold 10px text) instead of
+     washing out against a lighter green. */
+  background: var(--cluster-switch-on, #43a047);
+}
+
+.cluster-row-checkbox:checked + .cluster-row-track::after {
+  content: 'ON';
+  right: auto;
+  left: calc(8px * var(--cluster-switch-scale, 1));
+  color: var(--cluster-switch-label-on, rgba(255, 255, 255, 0.95));
+}
+
+.cluster-row-checkbox:checked + .cluster-row-track .cluster-row-thumb {
+  /* 66px track, 1px border eaten by border-box, 24px thumb, 3px padding
+     each side: 66 - 2(border) - 24 - 2(3px padding) = 34, scaled the same
+     as every other dimension here. */
+  transform: translateX(calc(34px * var(--cluster-switch-scale, 1)));
+}
+
+.cluster-row-checkbox:focus-visible + .cluster-row-track {
+  outline: 2px solid var(--button-active);
+  outline-offset: 2px;
+}
+
+/* PostNL widget (js/components/postnl.js): incoming/sent PostNL shipments,
+   fetched via vendor/dashticz/postnl/index.php. Rows are painted into
+   .dt_state (js/dashticz.js's own content slot), same reasoning as Cluster
+   above - the block's configured icon/.dt_title stay untouched;
+   containerClass: 'postnl-block' is only a scoping hook here, same idea as
+   .cluster-block. */
+.postnl-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.postnl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.postnl-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.postnl-icon {
+  flex: none;
+  font-size: 1em;
+  line-height: 1;
+  width: 1.4em;
+  text-align: center;
+}
+
+.postnl-icon-emoji {
+  font-size: 24px;
+}
+
+.postnl-icon-in {
+  color: var(--dt-ok);
+}
+
+.postnl-icon-out {
+  color: var(--dt-info);
+}
+
+.postnl-row-delivered {
+  color: var(--text-muted, #8a8a8a);
+}
+
+.postnl-row-delivered .postnl-icon {
+  color: #7a7a7a;
+}
+
+.postnl-row-text {
+  font-size: inherit;
+  min-width: 0;
+  text-align: center;
+}
+
+.postnl-error {
+  text-align: center;
+  font-size: inherit;
+  color: var(--text-muted);
+}
+
+/* HP iLO widget (js/components/hpilo.js): clustered server info fetched via
+   vendor/dashticz/hpilo/index.php. Rows are painted into .dt_state, same
+   reasoning as the PostNL widget above. */
+.hpilo-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.hpilo-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.hpilo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#we-hpilo-add:not(:hover),
+.we-hpilo-remove:not(:hover) {
+  background-color: #fff;
+}
+
+.we-hpilo-name {
+  min-width: 0;
+}
+
+/* margin: 0 !important - same reasoning as .cluster-row-icon above: legacy
+   per-icon rules further up this file (.fas.fa-plug, .fas.fa-microchip, ...)
+   would otherwise add a stray margin to the exact Font Awesome classes some
+   METRICS entries use (js/components/hpilo.js), making that row's icon
+   jump out of line with the others. */
+.hpilo-block .dt_state .hpilo-icon {
+  flex: none;
+  width: 1.4em;
+  margin: 0 !important;
+  font-size: 1em;
+  line-height: 1;
+  text-align: center;
+  color: var(--dt-info);
+}
+
+.hpilo-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hpilo-value {
+  flex: none;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hpilo-warning .hpilo-value {
+  color: var(--dt-warn);
+}
+
+.hpilo-critical .hpilo-value {
+  color: var(--dt-error);
+}
+
+.hpilo-error {
+  font-size: inherit;
+  color: var(--text-muted);
 }
 
 @media (max-width: 975px) {
@@ -4772,7 +5748,7 @@ a:not([href]) {
 }
 
 .news .headline .description {
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .news .headline .updated {
@@ -5509,7 +6485,7 @@ canvas {
   justify-content: center;
   height: inherit;
   color: #bebebe;
-  background-color: var(--main-bg);
+  background: var(--main-bg);
 }
 
 .sec-modal .sec-frame {
@@ -5745,7 +6721,7 @@ canvas {
 
 .sec-frame .keypad-input .status:before {
   position: relative;
-  font-family: 'Font Awesome 5 Free';
+  font-family: 'Font Awesome 7 Free';
   mix-blend-mode: soft-light;
   font-weight: 900;
   font-size: 100%;
@@ -5774,7 +6750,7 @@ canvas {
 
 .sec-frame .keypad-input .key[data-id='cancel']:before {
   content: '\f104';
-  font-family: 'Font Awesome 5 Free';
+  font-family: 'Font Awesome 7 Free';
   font-weight: 900;
   font-size: 100%;
 }
@@ -7150,7 +8126,7 @@ canvas {
 }
 
 .dialbtn.middle {
-  background-color: var(--main-bg);
+  background: var(--main-bg);
   align-items: center;
   clip: rect(2.8em, 10em, 5.7em, 0px);
   display: flex;
@@ -7325,7 +8301,7 @@ canvas {
 }
 
 .colorpicker .cp-buttonsOnOff {
-  background-color: var(--main-bg);
+  background: var(--main-bg);
 }
 
 .colorpicker .cp-buttonsOnOff .btn {
@@ -7639,6 +8615,13 @@ canvas {
 /* Page / panel backgrounds */
 .transbg,
 .dt_block {
+  /* background-color, not the full shorthand: both selectors already get
+     their background-image (a plain color or, per theme, a gradient - see
+     themes/modern-dark's own --main-bg) from an earlier full `background:
+     var(--main-bg);` rule (.dt_block itself above, .transbg further up)
+     that also sets background-clip: padding-box. The full shorthand here
+     would reset that clip back to its own initial (border-box) instead of
+     refining just the color the way this rule intends. */
   background-color: var(--main-bg);
 }
 
@@ -7862,5 +8845,990 @@ canvas {
   }
   .lms-block .dt_state {
     min-height: 72px;
+  }
+}
+
+/* Compact Selector Switch icon picker (Device Config): every icon in the
+   toggle and in the pull-down has the same size and the same single colour. The theme's global .fas.fa-* rules (colour and size !important)
+   would otherwise make each icon look different. */
+.de-config-popup .de-compact-icon-row .de-compact-icon-toggle > i,
+.de-config-popup .de-compact-icon-row .de-compact-icon-choice > i {
+  display: inline-block;
+  width: 1.25em;
+  margin: 0 !important;
+  color: var(--bs-body-color, #212529) !important;
+  font-size: 13px !important;
+  line-height: 1;
+  text-align: center;
+}
+
+/* Cluster row icon picker (Device Config / Cluster popup): same uniform size
+   and single colour for every icon as the compact selector's picker above -
+   the theme's global .fas.fa-* rules (size and colour !important) would
+   otherwise make each icon look different. */
+.cl-icon-wrap .cl-icon-toggle > i,
+.cl-icon-wrap .cl-icon-panel .cl-icon-choice > i {
+  display: inline-block;
+  width: 1.25em;
+  margin: 0 !important;
+  color: var(--bs-body-color, #212529) !important;
+  font-size: 13px !important;
+  line-height: 1;
+  text-align: center;
+}
+
+/* HP iLO row icon picker (Widget Config): same uniform size and single colour
+   for every icon as the other icon pickers - the theme's global .fas.fa-*
+   rules (size and colour !important) would otherwise make each look
+   different. */
+.we-hpilo-icon-wrap .we-hpilo-icon-toggle > i,
+.we-hpilo-icon-wrap .we-hpilo-icon-panel .we-hpilo-icon-choice > i {
+  display: inline-block;
+  width: 1.25em;
+  margin: 0 !important;
+  color: var(--bs-body-color, #212529) !important;
+  font-size: 13px !important;
+  line-height: 1;
+  text-align: center;
+}
+
+/* F1 widgets (js/components/f1.js): next event (centered) and all events, painted
+   into .dt_state. */
+.f1-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  /* The cluster's font size option sets --font-device-title on the tile. */
+  font-size: var(--font-device-title);
+}
+
+.f1-rows {
+  padding: 4px 0;
+  text-align: center;
+}
+
+.f1-list {
+  text-align: left;
+}
+
+.f1-list .f1-heading {
+  margin-bottom: 4px;
+  font-weight: bold;
+}
+
+.f1-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.f1-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.f1-value {
+  flex: none;
+  text-align: right;
+}
+
+.f1-past {
+  opacity: 0.5;
+}
+
+.f1-error {
+  color: var(--dt-error);
+}
+
+.f1-empty {
+  opacity: 0.8;
+}
+
+.f1-next {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.f1-image {
+  flex: none;
+  width: auto;
+  max-width: 40%;
+  height: 3em;
+  object-fit: contain;
+}
+
+/* TVgids widget (js/components/tvgids.js): one column per channel. The
+   columns have a minimum width (set inline from tvgidscolumnwidth) and fill
+   the block, so a wider block shows more of them next to each other. */
+.tvgids-block .dt_state {
+  display: block;
+  height: auto;
+  padding: 4px 0;
+  text-align: left;
+  font-size: var(--tvgids-font-size, 0.85em);
+  line-height: 1.35;
+}
+
+.tvgids-grid {
+  display: grid;
+  gap: 8px;
+  align-items: start;
+}
+
+.tvgids-channel {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.tvgids-head {
+  display: flex;
+  align-items: center;
+  min-height: 31px;
+  margin-bottom: 4px;
+}
+
+/* Many channel logos are black, so every logo sits in a small frame, white
+   by default (works on light and dark themes alike). The frame colour is
+   tvgidslogobg, set as --tvgids-logo-bg; it may be transparent. */
+.tvgids-logo,
+.de-tvgids-tile img {
+  box-sizing: content-box;
+  width: 51px;
+  height: 27px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--tvgids-logo-bg, #fff);
+  object-fit: contain;
+}
+
+/* 2px larger than the programmes, also with a custom tvgidsfontsize. */
+.tvgids-name {
+  font-size: calc(1em + 2px);
+  font-weight: bold;
+}
+
+/* With a logo the name is only the fallback for a missing image. */
+.tvgids-name-fallback,
+.tvgids-nologo .tvgids-logo {
+  display: none;
+}
+
+.tvgids-nologo .tvgids-name-fallback {
+  display: inline;
+}
+
+.tvgids-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tvgids-item {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 1px 0;
+}
+
+.tvgids-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.tvgids-title {
+  overflow-wrap: anywhere;
+}
+
+.tvgids-now {
+  font-weight: bold;
+}
+
+.tvgids-now .tvgids-time {
+  opacity: 1;
+}
+
+.tvgids-past {
+  opacity: 0.5;
+}
+
+.tvgids-empty,
+.tvgids-error {
+  padding: 2px 0;
+  opacity: 0.8;
+}
+
+.tvgids-error {
+  color: var(--dt-error);
+  opacity: 1;
+}
+
+/* Grid screens: a list widget (containerClass 'dt-widget-rows': F1, TVgids,
+   Traffic info) follows its row height and clips the excess; a longer list
+   scrolls inside the tile. Without this, min-height alone lets the tile grow
+   past its row, and .dt-grid-item's own overflow: auto then shows a scrollbar
+   on the grid item. */
+.dt-grid-screen > .dt-grid-layout > .dt-grid-item > .dt-widget-rows {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.dt-grid-screen
+  > .dt-grid-layout
+  > .dt-grid-item
+  > .dt-widget-rows
+  .dt_content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dt-grid-screen > .dt-grid-layout > .dt-grid-item > .dt-widget-rows .dt_state {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* TVgids section of the quick-add and Device Config popups
+   (js/deviceeditor.js _tvgidsFieldsHtml): the channel logos as tiles, per
+   channel group. */
+.de-tvgids-picker {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 2px 4px 2px 0;
+}
+
+.de-tvgids-group + .de-tvgids-group {
+  margin-top: 10px;
+}
+
+.de-tvgids-group-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.de-tvgids-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 6px;
+}
+
+.de-tvgids-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 4px 4px;
+  border: 2px solid var(--bs-border-color, #dee2e6);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.08);
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.de-tvgids-tile-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.de-tvgids-tile.active {
+  border-color: var(--bs-primary, #0d6efd);
+  background: rgba(13, 110, 253, 0.15);
+}
+
+/* The position of a chosen channel in the block. */
+.de-tvgids-order {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: none;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--bs-primary, #0d6efd);
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 18px;
+}
+
+.de-tvgids-tile.active .de-tvgids-order {
+  display: block;
+}
+
+.de-tvgids-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+@media (max-width: 575px) {
+  .de-tvgids-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Device Config -> Text: per-device font size and alignment, set by
+   js/blocks.js applyBlockTextStyle(). Specific enough (and !important) to
+   win over the default and theme .title/.state/.value/.mh rules. */
+.mh.dt-fs-title .col-data .title {
+  font-size: var(--dt-fs-title) !important;
+}
+
+.mh.dt-fs-value .col-data .state,
+.mh.dt-fs-value .col-data .value {
+  font-size: var(--dt-fs-value) !important;
+}
+
+.mh.dt-align-left,
+.mh.dt-align-left .col-data,
+.mh.dt-align-left .col-data > * {
+  text-align: left !important;
+}
+
+.mh.dt-align-center,
+.mh.dt-align-center .col-data,
+.mh.dt-align-center .col-data > * {
+  text-align: center !important;
+}
+
+.mh.dt-align-right,
+.mh.dt-align-right .col-data,
+.mh.dt-align-right .col-data > * {
+  text-align: right !important;
+}
+
+/* Block without an icon (Icon toggle off): the empty .col-icon column still
+   takes up space, which pushed aligned text off the block. Drop the empty
+   column and let the data span the full width. */
+.mh[class*='dt-align-'] .col-icon:empty {
+  display: none;
+}
+
+.mh[class*='dt-align-'] .col-icon:empty + .col-data {
+  width: 100%;
+}
+
+/* Vertical alignment of the content in the block (Device Config -> Text ->
+   Vertical, block.textvalign). */
+.mh.dt-valign-top,
+.mh.dt-valign-middle,
+.mh.dt-valign-bottom {
+  display: flex;
+}
+
+.mh.dt-valign-top {
+  align-items: flex-start;
+}
+
+.mh.dt-valign-middle {
+  align-items: center;
+}
+
+.mh.dt-valign-bottom {
+  align-items: flex-end;
+}
+
+/* Shared widget button (.dt-btn): a rounded, themed button for the controls of
+   a widget, used by the LMS control and the Fully Kiosk widget. Add .on for
+   the active state of a power or toggle button. The size is set by the widget
+   itself. */
+.dt-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-selector, 4px);
+  background: var(--main-bg-dark);
+  color: var(--text-normal);
+  font-size: var(--font-small);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.dt-btn:hover {
+  background: var(--main-bg-dark-hover, var(--main-bg-dark));
+}
+
+.dt-btn:active {
+  transform: scale(0.94);
+}
+
+.dt-btn:focus-visible {
+  outline: 2px solid var(--button-active);
+  outline-offset: 1px;
+}
+
+.dt-btn.on {
+  background: var(--button-active);
+  color: var(--main-bg, #fff);
+}
+
+/* The themes give every .transbg (so these buttons too) their panel
+   background and edge with !important; the active state has to win from
+   that, with the theme's active border colour as the edge. */
+.transbg.dt-btn.on:not(.dial) {
+  background: var(--button-active) !important;
+  box-shadow: inset 0 0 0 var(--main-border-width, 1px)
+    var(--border-color-active) !important;
+  color: #fff;
+}
+
+/* Fully Kiosk widget (js/components/fullykiosk.js): battery, next switch
+   percentage and the charger switch, painted into .dt_state like the HP iLO
+   widget above. Every row has two columns: the data and the switch (or
+   button) at the right; no margin or padding to the left of the rows. */
+.fullykiosk-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+/* The rows are laid out in 3 columns: every switch has its label right
+   next to it on the same line. The charger group (charge data and its
+   button), the brightness slider and the error text use the full width. */
+.fullykiosk-rows {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 4px 0;
+}
+
+.fullykiosk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fullykiosk-group,
+.fullykiosk-row.fullykiosk-battery,
+.fullykiosk-brightness-row,
+.fullykiosk-error {
+  grid-column: 1 / -1;
+}
+
+.fullykiosk-group,
+.fullykiosk-row.fullykiosk-battery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 25%;
+  column-gap: 10px;
+}
+
+@media (max-width: 767px) {
+  .fullykiosk-rows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .fullykiosk-rows {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.fullykiosk-data {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* margin: 0 !important - same reasoning as .hpilo-icon above. */
+.fullykiosk-block .dt_state .fullykiosk-icon {
+  flex: none;
+  width: 1.4em;
+  margin: 0 !important;
+  font-size: 1em;
+  line-height: 1;
+  text-align: center;
+  color: var(--dt-info);
+}
+
+.fullykiosk-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fullykiosk-value {
+  flex: none;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fullykiosk-battery .fullykiosk-value {
+  font-weight: bold;
+}
+
+/* The buttons of column 1 are shared .dt-btn buttons (see above). A power button shows its state (filled when on); side by side when a row
+   has two. */
+.fullykiosk-control {
+  display: flex;
+  gap: 6px;
+  /* In a switch row the switch comes first, its label right next to it. */
+  flex: none;
+  order: 0;
+}
+
+.fullykiosk-control:empty {
+  display: none;
+}
+
+.fullykiosk-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 3.4em;
+  height: 3.4em;
+}
+
+/* The charger button runs over the rows of the charge data, at the right of
+   the data in column 2. */
+.fullykiosk-group {
+  align-items: stretch;
+}
+
+.fullykiosk-group .fullykiosk-control,
+.fullykiosk-row.fullykiosk-battery .fullykiosk-control {
+  order: 2;
+  margin-left: 10px;
+  margin-right: 5px;
+  width: calc(100% - 15px);
+}
+
+.fullykiosk-group .fullykiosk-btn {
+  flex: 1 1 0;
+  width: auto;
+}
+
+.fullykiosk-group .fullykiosk-btn {
+  height: auto;
+}
+
+/* A power button that is off has a grey icon. */
+.fullykiosk-btn[role='switch']:not(.on) {
+  color: var(--text-muted);
+}
+
+.fullykiosk-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.fullykiosk-error {
+  font-size: inherit;
+  color: var(--dt-error);
+}
+
+/* Device Config / quick-add -> Fully Kiosk section
+   (js/deviceeditor.js _fullyFieldsHtml()): three columns, two on a narrow
+   popup, one on a phone. */
+/* A switch setting shows its label right next to the switch (switch first)
+   instead of above it (Device Config sections and Widget Config). */
+.de-setting-switch > .mb-3 {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  justify-content: flex-end;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.we-cfg-switch {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  justify-content: flex-end;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.we-cfg-switch .form-label,
+.we-cfg-switch .form-switch,
+.de-setting-switch .form-label,
+.de-setting-switch .form-switch {
+  margin-bottom: 0;
+}
+
+.we-cfg-switch .form-text,
+.de-setting-switch .form-text {
+  flex: 0 0 100%;
+  order: 3;
+}
+
+.de-fully-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.de-fully-grid > .de-fully-field-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 767px) {
+  .de-fully-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .de-fully-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The icon in a button: absolute size, legacy per-icon rules further up
+   (.fas.fa-power-off, ...) would otherwise enlarge or shift it. */
+.fullykiosk-block .fullykiosk-btn .fas {
+  margin: 0 !important;
+  font-size: calc(var(--font-small) + 4px) !important;
+  line-height: 1;
+}
+
+/* Fully Kiosk widget: no scrollbars. A tile that is too small for its rows
+   still scrolls (touch or wheel), but without a visible scrollbar. */
+.fullykiosk-block,
+.fullykiosk-block .dt_content,
+.fullykiosk-block .dt_state {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.fullykiosk-block::-webkit-scrollbar,
+.fullykiosk-block .dt_content::-webkit-scrollbar,
+.fullykiosk-block .dt_state::-webkit-scrollbar {
+  display: none;
+}
+
+/* The icon of the charger button is 2px bigger than the other buttons'. */
+.fullykiosk-block .fullykiosk-group .fullykiosk-btn .fas {
+  font-size: calc(var(--font-small) + 6px) !important;
+}
+
+/* Fully Kiosk widget: the brightness dimmer slider and its value. */
+.fullykiosk-brightness-input {
+  width: 8em;
+  max-width: 60%;
+  margin-right: 8px;
+  vertical-align: middle;
+  accent-color: var(--button-active);
+}
+
+.fullykiosk-brightness-value {
+  display: inline-block;
+  min-width: 3em;
+  text-align: right;
+}
+
+/* Device Config / quick-add -> Weather Info section
+   (js/deviceeditor.js _weatherinfoFieldsHtml()): two columns, one on a
+   phone. */
+.de-weatherinfo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.de-weatherinfo-grid > .de-weatherinfo-field-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 575px) {
+  .de-weatherinfo-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Weather Info widget (js/components/weatherinfo.js): the rain status, and
+   below it the temperature, description, wind and icon, centered like the
+   F1 'next' tile. */
+/* The text is centered horizontally and vertically in the block. */
+.weatherinfo-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.weatherinfo-block .dt_content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  text-align: center;
+}
+
+.weatherinfo-block .dt_state,
+.dt-grid-screen
+  > .dt-grid-layout
+  > .dt-grid-item
+  > .weatherinfo-block
+  .dt_state {
+  /* No scrollbar: the text is centered in the block. */
+  overflow: hidden !important;
+  scrollbar-width: none;
+}
+
+.weatherinfo-block .dt_state::-webkit-scrollbar {
+  display: none;
+}
+
+.weatherinfo-block .dt_state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+  /* The cluster's font size option sets --font-device-title on the tile. */
+  font-size: var(--font-device-title);
+}
+
+.weatherinfo-rows {
+  padding: 4px 0;
+  text-align: center;
+}
+
+.weatherinfo-row {
+  padding: 2px 0;
+}
+
+.weatherinfo-hl {
+  color: var(--dt-warn);
+  font-weight: bold;
+}
+
+.weatherinfo-dot {
+  color: var(--dt-ok);
+  white-space: pre;
+}
+
+.weatherinfo-icon {
+  vertical-align: middle;
+  font-size: 1.5em;
+  line-height: 1;
+}
+
+.weatherinfo-rainfall {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.weatherinfo-error {
+  color: var(--dt-error);
+}
+
+/* Weather Info settings: the parts of the text, shown or hidden and dragged
+   into order (js/deviceeditor.js, type 'parts'). */
+.de-parts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border: 1px solid var(--bs-border-color, #ced4da);
+  border-radius: 6px;
+  background: var(--bs-body-bg, #fff);
+}
+
+.de-parts-handle {
+  cursor: grab;
+  opacity: 0.6;
+  touch-action: none;
+}
+
+.cl-pending-item.ui-sortable-helper {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.cl-pending-handle {
+  align-self: center;
+  margin-right: 0.5rem;
+}
+
+.de-parts-item.ui-sortable-helper {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* Weather Info animated icons (js/components/weatherinfo.js, SVG_ICONS). */
+.weatherinfo-svg {
+  width: 2.6em;
+  height: 2.6em;
+  vertical-align: middle;
+  /* The icon must not make the row taller than the text. */
+  margin: -0.6em 0;
+  overflow: visible;
+}
+
+.weatherinfo-svg * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.weatherinfo-svg .wi-spin {
+  animation: wi-spin 24s linear infinite;
+}
+
+.weatherinfo-svg .wi-drift {
+  animation: wi-drift 3s ease-in-out infinite alternate;
+}
+
+.weatherinfo-svg .wi-glow {
+  animation: wi-glow 4s ease-in-out infinite alternate;
+}
+
+.weatherinfo-svg .wi-twinkle {
+  animation: wi-twinkle 2.4s ease-in-out infinite;
+}
+
+.weatherinfo-svg .wi-fall {
+  animation: wi-fall 1s linear infinite;
+}
+
+.weatherinfo-svg .wi-snowfall {
+  animation: wi-snowfall 2.4s linear infinite;
+}
+
+.weatherinfo-svg .wi-flash {
+  animation: wi-flash 2.2s ease-in-out infinite;
+}
+
+.weatherinfo-svg .wi-slide {
+  animation: wi-slide 4s ease-in-out infinite alternate;
+}
+
+.weatherinfo-svg .wi-d2 {
+  animation-delay: -0.4s;
+}
+
+.weatherinfo-svg .wi-d3 {
+  animation-delay: -0.8s;
+}
+
+@keyframes wi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wi-drift {
+  from {
+    transform: translate(-5px, 1px);
+  }
+  to {
+    transform: translate(5px, -2px);
+  }
+}
+
+@keyframes wi-glow {
+  from {
+    opacity: 0.8;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wi-twinkle {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes wi-fall {
+  0% {
+    transform: translateY(-3px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+}
+
+@keyframes wi-snowfall {
+  0% {
+    transform: translate(-1px, -4px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(2px, 6px);
+    opacity: 0;
+  }
+}
+
+@keyframes wi-flash {
+  0%,
+  55%,
+  100% {
+    opacity: 0.25;
+  }
+  60%,
+  70% {
+    opacity: 1;
+  }
+  65% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes wi-slide {
+  from {
+    transform: translateX(-3px);
+  }
+  to {
+    transform: translateX(3px);
+  }
+}
+
+/* Device Config -> Selector Switch compact option: the icon per level in two
+   columns (one on a narrow popup); the heading spans both. */
+.de-compact-icons:not(.d-none) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.de-compact-icons > .form-label {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 479px) {
+  .de-compact-icons:not(.d-none) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

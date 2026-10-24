@@ -32,6 +32,24 @@ var DashticzWidgetEditor = (function () {
       height: 120,
     },
     {
+      id: 'postnl',
+      blockKey: 'widget_postnl',
+      title: 'PostNL',
+      description: 'Incoming and sent PostNL shipments.',
+      icon: 'fas fa-box',
+      width: 6,
+      height: 160,
+    },
+    {
+      id: 'hpilo',
+      blockKey: 'widget_hpilo',
+      title: 'HP iLO',
+      description: 'HPE server status (power, fans, temperatures) via iLO.',
+      icon: 'fas fa-server',
+      width: 4,
+      height: 200,
+    },
+    {
       id: 'spotify',
       blockKey: 'widget_spotify',
       title: 'Spotify',
@@ -275,7 +293,7 @@ var DashticzWidgetEditor = (function () {
     var backRequested = false;
     $popup.on('click', '.we-back-btn', function () {
       backRequested = true;
-      window.bootstrap.Modal.getInstance(popup).hide();
+      _hideModal(popup);
     });
     $popup.one('hidden.bs.modal', function () {
       if (
@@ -444,13 +462,18 @@ var DashticzWidgetEditor = (function () {
       // just drops off the block on the next save instead of showing up
       // as a stray "Extra fields" row with nothing to edit it.
       provider: true,
+      // Like provider: no field, an old radars property just drops off the
+      // block (the RWS API has no speed-camera category).
+      radars: true,
       trafficJams: true,
       roadWorks: true,
-      radars: true,
       results: true,
       maxDistance: true,
       latitude: true,
       longitude: true,
+      filter: true,
+      road: true,
+      showemptyroads: true,
     },
     camera: { imageUrl: true, videoUrl: true, cameras: true },
     alarmmeldingen: { rss: true, filter: true },
@@ -548,7 +571,8 @@ var DashticzWidgetEditor = (function () {
       // widgets already saved.
       iconValue: explicitDefaultIcon,
       hide_data: false,
-      last_update: false,
+      // undefined: the block follows the global last_update setting
+      last_update: undefined,
       show_title: true,
       customFields: [{ field: 'title', setting: '', system: true }],
       preservedFields: {},
@@ -635,7 +659,17 @@ var DashticzWidgetEditor = (function () {
         return '';
       }
     }
-    return String(value);
+    var text = String(value);
+    if (value === '') return '""'; // an empty row would block the popup
+    if (typeof value === 'string') {
+      // A text value that would read back as another type ('007', 'true') is
+      // shown as a JSON string, so a save keeps it a string.
+      var parsed = _parseCustomSetting(text);
+      if (!parsed.valid || parsed.value !== value || /^"/.test(text)) {
+        return JSON.stringify(value);
+      }
+    }
+    return text;
   }
 
   function _hydrateWidgetBlockOptions(item, definition) {
@@ -654,8 +688,12 @@ var DashticzWidgetEditor = (function () {
       typeof definition.icon === 'string' && definition.icon !== ''
         ? definition.icon
         : null;
-    options.hide_data = definition.hide_data === true;
-    options.last_update = definition.last_update === true;
+    options.hide_data = !!definition.hide_data;
+    // Keep an explicit false; undefined stays undefined (global setting).
+    options.last_update =
+      typeof definition.last_update === 'undefined'
+        ? undefined
+        : !!definition.last_update;
     options.show_title = definition.hide_title !== true;
     options.customFields = [
       {
@@ -758,6 +796,15 @@ var DashticzWidgetEditor = (function () {
     if (text === 'false') return { valid: true, value: false };
     if (/^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) {
       return { valid: true, value: Number(text) };
+    }
+    if (/^".*"$/.test(text)) {
+      try {
+        var quoted = JSON.parse(text);
+        if (typeof quoted === 'string') return { valid: true, value: quoted };
+      } catch (ignore) {
+        /* not a JSON string: keep the text as typed */
+      }
+      return { valid: true, value: text };
     }
     if (/^[\[{]/.test(text)) {
       try {
@@ -1071,12 +1118,37 @@ var DashticzWidgetEditor = (function () {
         sonarr_apikey: _s('sonarr_apikey'),
         sonarr_maxitems: _s('sonarr_maxitems'),
       },
+      postnl: {
+        postnl_username: _s('postnl_username'),
+        postnl_password: _s('postnl_password'),
+        postnl_days: _s('postnl_days', '2'),
+        postnl_pollminutes: _s('postnl_pollminutes', '60'),
+        postnl_fontsize: _s('postnl_fontsize', '14'),
+        postnl_showdelivered: _n('postnl_showdelivered', 1),
+        postnl_iconstyle: _s('postnl_iconstyle', 'fa'),
+        postnl_date_color: _s('postnl_date_color'),
+        postnl_time_color: _s('postnl_time_color'),
+        postnl_text_color: _s('postnl_text_color'),
+      },
+      hpilo: {
+        hpilo_host: _s('hpilo_host'),
+        hpilo_port: _s('hpilo_port', '443'),
+        hpilo_username: _s('hpilo_username'),
+        hpilo_password: _s('hpilo_password'),
+        hpilo_pollseconds: _s('hpilo_pollseconds', '300'),
+        hpilo_fontsize: _s('hpilo_fontsize', '14'),
+        hpilo_rows: _s(
+          'hpilo_rows',
+          'power,health,uptime,fanspeed,cputemp,inlettemp'
+        ),
+        hpilo_icons: _s('hpilo_icons', '{}'),
+      },
       spotify: {
         spot_clientid: _s('spot_clientid'),
       },
       calendar: {
         sources: [_defaultCalendarSource(0)],
-        calendarformat: _s('calendarformat', 'dd DD.MM HH:mm'),
+        calendarformat: _s('calendarformat', 'dd DD-MM HH:mm'),
         calendarlanguage: _s('calendarlanguage', 'en_US'),
         calendar_maxitems: _s('calendar_maxitems', '15'),
       },
@@ -1097,9 +1169,11 @@ var DashticzWidgetEditor = (function () {
       trafficinfo: {
         trafficJams: 1,
         roadWorks: 1,
-        radars: 1,
         results: 5,
         maxDistance: 40,
+        filter: 'distance',
+        road: '',
+        showemptyroads: 0,
       },
       map: {
         gm_api: _s('gm_api'),
@@ -1207,7 +1281,10 @@ var DashticzWidgetEditor = (function () {
             ? blocks[reference]
             : {};
         var item = _catalogItemForDefinition(reference, definition);
-        if (!item) return;
+        // Only the first block of a kind is managed here. Repeatable blocks
+        // (a second iframe, camera, ...) map to the same catalog item; they
+        // stay untouched so the layout never gets two blocks with one ref.
+        if (!item || selectedWidgets[item.id]) return;
 
         selectedWidgets[item.id] = true;
         // Keep an existing custom reference, while new widgets use the stable
@@ -1393,9 +1470,6 @@ var DashticzWidgetEditor = (function () {
           if (typeof definition.roadWorks !== 'undefined') {
             widgetConfigs.trafficinfo.roadWorks = definition.roadWorks ? 1 : 0;
           }
-          if (typeof definition.radars !== 'undefined') {
-            widgetConfigs.trafficinfo.radars = definition.radars ? 1 : 0;
-          }
           if (typeof definition.results !== 'undefined') {
             widgetConfigs.trafficinfo.results = definition.results;
           }
@@ -1408,6 +1482,7 @@ var DashticzWidgetEditor = (function () {
           if (typeof definition.longitude !== 'undefined') {
             widgetConfigs.trafficinfo.longitude = definition.longitude;
           }
+          _hydrateTrafficRoadFilter(definition);
         }
         if (item.id === 'camera') {
           if (Array.isArray(definition.cameras) && definition.cameras.length) {
@@ -1674,6 +1749,8 @@ var DashticzWidgetEditor = (function () {
       weather: 'weather',
       wunderground: 'weather',
       garbage: 'garbage',
+      postnl: 'postnl',
+      hpilo: 'hpilo',
       spotify: 'spotify',
       sonarr: 'sonarr',
       calendar: 'calendar',
@@ -1705,6 +1782,15 @@ var DashticzWidgetEditor = (function () {
     return catalog.find(function (item) {
       return item.id === id;
     });
+  }
+
+  // A layout item belongs to a managed widget only when it is the block this
+  // editor tracks for that kind; any other block of the same kind is passed
+  // through unchanged.
+  function _isManagedLayoutItem(item) {
+    if (!item.widgetId) return false;
+    var tracked = widgetBlockRefs[item.widgetId];
+    return !tracked || tracked === item.ref;
   }
 
   function _readGridConfig() {
@@ -1746,6 +1832,8 @@ var DashticzWidgetEditor = (function () {
             ? blocks[reference]
             : {};
         var item = _catalogItemForDefinition(reference, definition);
+        // See the column-mode reader: a repeated kind stays an unmanaged block.
+        if (item && selectedWidgets[item.id]) item = null;
         var grid = {
           x: _gridValue(this, '--dt-grid-x', 1),
           y: _gridValue(this, '--dt-grid-y', index + 1),
@@ -1847,7 +1935,6 @@ var DashticzWidgetEditor = (function () {
       [
         ['trafficJams', 1],
         ['roadWorks', 1],
-        ['radars', 1],
       ].forEach(function (mapping) {
         var prop = mapping[0];
         widgetConfigs.trafficinfo[prop] =
@@ -1869,6 +1956,7 @@ var DashticzWidgetEditor = (function () {
       if (typeof definition.longitude !== 'undefined') {
         widgetConfigs.trafficinfo.longitude = definition.longitude;
       }
+      _hydrateTrafficRoadFilter(definition);
     } else if (item.id === 'camera') {
       if (Array.isArray(definition.cameras) && definition.cameras.length) {
         widgetConfigs.camera.cameras = definition.cameras;
@@ -2160,6 +2248,10 @@ var DashticzWidgetEditor = (function () {
     html += _newsWidgetCardHtml();
     html += _lmsWidgetCardHtml();
     html += _graphWidgetCardHtml();
+    html += _f1WidgetCardHtml();
+    html += _tvgidsWidgetCardHtml();
+    html += _fullykioskWidgetCardHtml();
+    html += _weatherinfoWidgetCardHtml();
 
     html +=
       '</div><div class="we-message" role="status"></div></div>' +
@@ -2176,6 +2268,19 @@ var DashticzWidgetEditor = (function () {
       '</div></div></div></div>';
 
     $('body').append(html);
+    // Show the widget cards alphabetically (by the displayed, translated title).
+    $('#widgeteditorpopup .we-widget-grid').each(function () {
+      var $cards = $(this).children('.we-widget-card').get();
+      $cards.sort(function (a, b) {
+        return $(a)
+          .find('.we-widget-title')
+          .text()
+          .localeCompare($(b).find('.we-widget-title').text(), undefined, {
+            sensitivity: 'base',
+          });
+      });
+      $(this).append($cards);
+    });
     _attachHandlers();
     _wireBackButton('widgeteditorpopup');
     window.bootstrap.Modal.getOrCreateInstance(
@@ -2189,6 +2294,8 @@ var DashticzWidgetEditor = (function () {
       id === 'calendar' ||
       id === 'clock' ||
       id === 'garbage' ||
+      id === 'postnl' ||
+      id === 'hpilo' ||
       id === 'sonarr' ||
       id === 'spotify' ||
       id === 'secpanel' ||
@@ -2597,6 +2704,136 @@ var DashticzWidgetEditor = (function () {
     );
   }
 
+  /* F1 (docs/blocks/specials/f1.rst, js/components/f1.js) is, like Graph,
+     only ever a repeatable card: it opens the F1 quick-add popup
+     (DashticzDeviceEditor.openF1()), where the tile itself is set to show
+     the next event or all events. */
+  function _f1WidgetCardHtml() {
+    var itemTitle = _t('f1_title', 'F1');
+    return (
+      '<div class="we-widget-card we-widget-card-f1" data-special-widget="f1" ' +
+      'role="button" tabindex="0" aria-label="' +
+      itemTitle +
+      '">' +
+      '<div class="we-widget-icon"><i class="fas fa-flag-checkered" aria-hidden="true"></i></div>' +
+      '<div class="we-widget-content"><div class="we-widget-title">' +
+      itemTitle +
+      '</div><div class="we-widget-description">' +
+      _t(
+        'f1_description',
+        'Formula 1 race weekend: the next session, or all sessions (domoticz_F1 plugin).'
+      ) +
+      '</div></div>' +
+      '<div class="we-widget-status">' +
+      _t('click_to_add', 'Click to add') +
+      '</div></div>'
+    );
+  }
+
+  function _openF1FromWidgets() {
+    _closeModalWithoutSaving();
+    DT_function.loadDTScript('js/deviceeditor.js').then(function () {
+      DashticzDeviceEditor.openF1();
+    });
+  }
+
+  /* TVgids (docs/blocks/specials/tvgids.rst, js/components/tvgids.js) is,
+     like F1, only ever a repeatable card: it opens the TVgids quick-add
+     popup (DashticzDeviceEditor.openTvgids()), where the channels are
+     picked from their logos. */
+  function _tvgidsWidgetCardHtml() {
+    var itemTitle = _t('tvgids_title', 'TVgids24');
+    return (
+      '<div class="we-widget-card we-widget-card-tvgids" data-special-widget="tvgids" ' +
+      'role="button" tabindex="0" aria-label="' +
+      itemTitle +
+      '">' +
+      '<div class="we-widget-icon"><i class="fas fa-tv" aria-hidden="true"></i></div>' +
+      '<div class="we-widget-content"><div class="we-widget-title">' +
+      itemTitle +
+      '</div><div class="we-widget-description">' +
+      _t(
+        'tvgids_description',
+        "Today's TV programme of the chosen channels (tvgids24.nl)."
+      ) +
+      '</div></div>' +
+      '<div class="we-widget-status">' +
+      _t('click_to_add', 'Click to add') +
+      '</div></div>'
+    );
+  }
+
+  function _openTvgidsFromWidgets() {
+    _closeModalWithoutSaving();
+    DT_function.loadDTScript('js/deviceeditor.js').then(function () {
+      DashticzDeviceEditor.openTvgids();
+    });
+  }
+
+  /* Fully Kiosk (docs/blocks/specials/fullykiosk.rst,
+     js/components/fullykiosk.js) is also only a repeatable card: it opens the
+     Fully Kiosk quick-add popup (DashticzDeviceEditor.openFullykiosk()). */
+  function _fullykioskWidgetCardHtml() {
+    var itemTitle = _t('fullykiosk_title', 'Fully Kiosk');
+    return (
+      '<div class="we-widget-card we-widget-card-fullykiosk" data-special-widget="fullykiosk" ' +
+      'role="button" tabindex="0" aria-label="' +
+      itemTitle +
+      '">' +
+      '<div class="we-widget-icon"><i class="fas fa-tablet-screen-button" aria-hidden="true"></i></div>' +
+      '<div class="we-widget-content"><div class="we-widget-title">' +
+      itemTitle +
+      '</div><div class="we-widget-description">' +
+      _t(
+        'fullykiosk_description',
+        'Battery of a Fully Kiosk tablet with charge control (domoticz_fullykiosk plugin).'
+      ) +
+      '</div></div>' +
+      '<div class="we-widget-status">' +
+      _t('click_to_add', 'Click to add') +
+      '</div></div>'
+    );
+  }
+
+  function _openFullykioskFromWidgets() {
+    _closeModalWithoutSaving();
+    DT_function.loadDTScript('js/deviceeditor.js').then(function () {
+      DashticzDeviceEditor.openFullykiosk();
+    });
+  }
+
+  /* Weather Info (docs/blocks/specials/weatherinfo.rst,
+     js/components/weatherinfo.js) is also only a repeatable card: it opens
+     the Weather Info quick-add popup (DashticzDeviceEditor.openWeatherinfo()). */
+  function _weatherinfoWidgetCardHtml() {
+    var itemTitle = _t('weatherinfo_title', 'Weather info');
+    return (
+      '<div class="we-widget-card we-widget-card-weatherinfo" data-special-widget="weatherinfo" ' +
+      'role="button" tabindex="0" aria-label="' +
+      itemTitle +
+      '">' +
+      '<div class="we-widget-icon"><i class="fas fa-cloud-sun-rain" aria-hidden="true"></i></div>' +
+      '<div class="we-widget-content"><div class="we-widget-title">' +
+      itemTitle +
+      '</div><div class="we-widget-description">' +
+      _t(
+        'weatherinfo_description',
+        'Rain forecast and current weather (Buienradar, domoticz_weatherinfo plugin).'
+      ) +
+      '</div></div>' +
+      '<div class="we-widget-status">' +
+      _t('click_to_add', 'Click to add') +
+      '</div></div>'
+    );
+  }
+
+  function _openWeatherinfoFromWidgets() {
+    _closeModalWithoutSaving();
+    DT_function.loadDTScript('js/deviceeditor.js').then(function () {
+      DashticzDeviceEditor.openWeatherinfo();
+    });
+  }
+
   function _openGraphFromWidgets() {
     _closeModalWithoutSaving();
     DT_function.loadDTScript('js/deviceeditor.js').then(function () {
@@ -2606,7 +2843,12 @@ var DashticzWidgetEditor = (function () {
 
   function _cfgField(key, label, type, value, opts, help) {
     var id = 'we-cfg-' + key.replace(/_/g, '-');
-    var html = '<div class="mb-3">';
+    // we-cfg-field: one uniform field spacing in every Widget Config (see
+    // css/creative.css); mb-3 stays for code that looks fields up by it.
+    var html =
+      '<div class="mb-3 we-cfg-field' +
+      (type === 'checkbox' ? ' we-cfg-switch' : '') +
+      '">';
     html +=
       '<label class="form-label we-field-label" for="' +
       _esc(id) +
@@ -2620,6 +2862,15 @@ var DashticzWidgetEditor = (function () {
         '" data-cfg-key="' +
         _esc(key) +
         '" value="' +
+        _esc(String(value !== null && value !== undefined ? value : '')) +
+        '">';
+    } else if (type === 'password') {
+      html +=
+        '<input type="password" class="form-control form-control-sm we-widget-field" id="' +
+        _esc(id) +
+        '" data-cfg-key="' +
+        _esc(key) +
+        '" autocomplete="new-password" value="' +
         _esc(String(value !== null && value !== undefined ? value : '')) +
         '">';
     } else if (type === 'checkbox') {
@@ -2654,9 +2905,17 @@ var DashticzWidgetEditor = (function () {
     } else if (type === 'number') {
       // number inputs use opts for min/max/step, so the GUI cannot produce
       // out-of-range values for fields like duration, ticks or lineTension.
+      // A stored value that is not a plain number (e.g. "0,9") keeps a text
+      // input instead, so opening and saving the popup never drops it.
       opts = opts || {};
+      var numberText =
+        value !== null && value !== undefined ? String(value).trim() : '';
+      var inputType =
+        numberText === '' || isFinite(Number(numberText)) ? 'number' : 'text';
       html +=
-        '<input type="number" class="form-control form-control-sm we-widget-field" id="' +
+        '<input type="' +
+        inputType +
+        '" class="form-control form-control-sm we-widget-field" id="' +
         _esc(id) +
         '" data-cfg-key="' +
         _esc(key) +
@@ -2700,12 +2959,48 @@ var DashticzWidgetEditor = (function () {
     return html;
   }
 
-  function _cfgHeading(text) {
+  // Traffic info: the Distance/Roads filter, the road list and the
+  // show-empty-roads option of an existing block. A hand-written block with
+  // a `road` list and no `filter` of its own is a Roads block (the 3.x
+  // behaviour, see js/components/trafficinfo.js). showemptyroads may be a
+  // custom text; it is kept so saving doesn't turn it back into `true`.
+  function _hydrateTrafficRoadFilter(definition) {
+    var cfg = widgetConfigs.trafficinfo;
+    var road = Array.isArray(definition.road)
+      ? definition.road.join(', ')
+      : typeof definition.road === 'string' ||
+          typeof definition.road === 'number'
+        ? String(definition.road)
+        : '';
+    cfg.road = road;
+    cfg.filter =
+      definition.filter === 'roads' || definition.filter === 'distance'
+        ? definition.filter
+        : road.trim()
+          ? 'roads'
+          : 'distance';
+    cfg.showemptyroads = definition.showemptyroads ? 1 : 0;
+    cfg.showemptyroadsText =
+      typeof definition.showemptyroads === 'string'
+        ? definition.showemptyroads
+        : '';
+  }
+
+  // Add button below a repeatable list (Calendar, Camera, Radio, Timegraph):
+  // the same green, labelled button everywhere (css/creative.css
+  // .dt-btn-green), like Automation's "Add automation".
+  function _addButtonHtml(id, label) {
     return (
-      '<h6 class="mt-3 mb-2" style="font-size:14px;font-weight:600;color:#495057">' +
-      text +
-      '</h6>'
+      '<button type="button" class="btn btn-sm dt-btn-green we-list-add" id="' +
+      id +
+      '"><i class="fas fa-plus" aria-hidden="true"></i>' +
+      _esc(label) +
+      '</button>'
     );
+  }
+
+  function _cfgHeading(text) {
+    return '<h6 class="de-section-title">' + text + '</h6>';
   }
 
   function _cameraRowHtml(camera, index) {
@@ -2724,24 +3019,25 @@ var DashticzWidgetEditor = (function () {
       _t('camera_remove', 'Remove camera') +
       '">' +
       '<i class="fas fa-minus" aria-hidden="true"></i></button></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="we-row-fields">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('name', 'Name') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-camera-title" maxlength="100" value="' +
       _esc(camera.title || _t('camera', 'Camera') + ' ' + (index + 1)) +
       '"></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('image_url', 'Image URL') +
       '</label>' +
       '<input type="url" class="form-control form-control-sm we-camera-image" value="' +
       _esc(camera.imageUrl || '') +
       '"></div>' +
-      '<div><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('video_url_optional', 'Video URL (optional, MJPEG)') +
       '</label>' +
       '<input type="url" class="form-control form-control-sm we-camera-video" value="' +
       _esc(camera.videoUrl || '') +
-      '"></div></div>'
+      '"></div></div></div>'
     );
   }
 
@@ -2763,26 +3059,27 @@ var DashticzWidgetEditor = (function () {
       _t('radio_remove', 'Remove station') +
       '"><i class="fas fa-minus" aria-hidden="true"></i></button>' +
       '</div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="we-row-fields">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('name', 'Name') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-radio-name" maxlength="100" value="' +
       _esc(station.name || '') +
       '"></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('radio_url', 'Stream URL') +
       '</label>' +
       '<input type="url" class="form-control form-control-sm we-radio-url" value="' +
       _esc(station.file || '') +
       '"></div>' +
-      '<div><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('radio_logo', 'Logo (URL or filename in img/custom/radio/)') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-radio-logo" ' +
       'placeholder="https://... or logo.png" value="' +
       _esc(station.logo || '') +
       '"></div>' +
-      '</div>'
+      '</div></div>'
     );
   }
 
@@ -2832,27 +3129,28 @@ var DashticzWidgetEditor = (function () {
       _esc(_t('calendar_remove', 'Remove calendar')) +
       '">' +
       '<i class="fas fa-minus" aria-hidden="true"></i></button></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="we-row-fields">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('calendar_name', 'Name') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-calendar-name" maxlength="100" value="' +
       _esc(source.name || '') +
       '"></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('ics_url', 'ICS URL') +
       '</label>' +
       '<input type="url" class="form-control form-control-sm we-calendar-url" maxlength="2048" ' +
       'placeholder="https://…/calendar.ics" value="' +
       _esc(source.ics || '') +
       '"></div>' +
-      '<div><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('calendar_color', 'Color') +
       '</label>' +
       '<input type="color" class="form-control form-control-color we-calendar-color" value="' +
       _calendarPickerColor(color) +
       '" data-calendar-color-value="' +
       _esc(color) +
-      '"></div></div>'
+      '"></div></div></div>'
     );
   }
 
@@ -2871,32 +3169,30 @@ var DashticzWidgetEditor = (function () {
       _t('timegraph_value', 'Value') +
       ' ' +
       (index + 1) +
-      '</strong><span>' +
-      '<button type="button" class="btn btn-sm btn-outline-success we-timegraph-value-add" title="' +
-      _t('timegraph_add_value', 'Add value') +
-      '"><i class="fas fa-plus" aria-hidden="true"></i></button> ' +
+      '</strong>' +
       '<button type="button" class="btn btn-sm btn-outline-danger we-timegraph-value-remove" title="' +
       _t('timegraph_remove_value', 'Remove value') +
       '"><i class="fas fa-minus" aria-hidden="true"></i></button>' +
-      '</span></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '</div>' +
+      '<div class="we-row-fields">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('timegraph_value_value', 'Value, e.g. Usage or NettUsage') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-timegraph-value-value" value="' +
       _esc(row.value || '') +
       '"></div>' +
-      '<div class="mb-2"><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('timegraph_value_idx', 'IDX (optional, main device by default)') +
       '</label>' +
       '<input type="number" min="1" step="1" class="form-control form-control-sm we-timegraph-value-idx" value="' +
       _esc(row.idx || '') +
       '"></div>' +
-      '<div><label class="form-label we-field-label">' +
+      '<div class="mb-3 we-cfg-field"><label class="form-label we-field-label">' +
       _t('timegraph_value_label', 'Label (optional)') +
       '</label>' +
       '<input type="text" class="form-control form-control-sm we-timegraph-value-label" value="' +
       _esc(row.label || '') +
-      '"></div></div>'
+      '"></div></div></div>'
     );
   }
 
@@ -2924,9 +3220,13 @@ var DashticzWidgetEditor = (function () {
           _esc(_t('field', 'Field')) +
           '"><option value="icon"' +
           (lowerField === 'icon' ? ' selected' : '') +
-          '>Icon</option><option value="image"' +
+          '>' +
+          _esc(_t('icon', 'Icon')) +
+          '</option><option value="image"' +
           (lowerField === 'image' ? ' selected' : '') +
-          '>Image</option></select>'
+          '>' +
+          _esc(_t('image', 'Image')) +
+          '</option></select>'
         : '<input type="text" class="form-control we-custom-field-name" placeholder="' +
           _esc(_t('field', 'Field')) +
           '" value="' +
@@ -2959,19 +3259,19 @@ var DashticzWidgetEditor = (function () {
     );
   }
 
-  // extraButtonHtml: optional control (e.g. Radio's Add station button) shown
-  // to the right of the Display options checkboxes.
-  // insertHtml: optional block (e.g. Radio's station list) shown above the
-  // Custom fields section, below the checkboxes.
-  function _widgetBlockOptionsHtml(item, extraButtonHtml, insertHtml) {
+  // Every Widget Config has the same section order: Display options, the
+  // widget's own Settings (see _buildConfigModalHtml()), then Custom fields
+  // last - the same order as Device Config.
+  function _widgetBlockOptionsFor(item) {
     var options =
       widgetBlockOptions[item.id] || _defaultWidgetBlockOptions(item);
     _ensureWidgetSystemFields(item, options);
     widgetBlockOptions[item.id] = options;
-    var rows =
-      options.customFields && options.customFields.length
-        ? options.customFields
-        : [{ field: '', setting: '' }];
+    return options;
+  }
+
+  function _widgetBlockOptionsHtml(item) {
+    var options = _widgetBlockOptionsFor(item);
     var html = _cfgHeading(_t('display_options', 'Display options'));
     html +=
       '<div class="d-flex align-items-center justify-content-between flex-wrap mb-2">';
@@ -3021,10 +3321,17 @@ var DashticzWidgetEditor = (function () {
         '</span></button>';
     });
     html += '</div>';
-    if (extraButtonHtml) html += extraButtonHtml;
     html += '</div>';
-    if (insertHtml) html += insertHtml;
-    html += _cfgHeading(_t('custom_fields', 'Custom fields'));
+    return html;
+  }
+
+  function _widgetCustomFieldsHtml(item) {
+    var options = _widgetBlockOptionsFor(item);
+    var rows =
+      options.customFields && options.customFields.length
+        ? options.customFields
+        : [{ field: '', setting: '' }];
+    var html = _cfgHeading(_t('custom_fields', 'Custom fields'));
     html +=
       '<p class="form-text">' +
       _esc(
@@ -3041,8 +3348,255 @@ var DashticzWidgetEditor = (function () {
     return html;
   }
 
+  // HP iLO widget: the rows the tile shows, in order. Same add/remove picker
+  // as the devices of a Cluster block; the order of the list is the order on
+  // the tile. Stored as a comma-separated list in the hidden hpilo_rows field.
+  var HPILO_ROWS = {
+    name: 'Server name',
+    model: 'Model',
+    power: 'Server power',
+    health: 'Server health',
+    uptime: 'Server uptime',
+    fanspeed: 'Server fanspeed',
+    cputemp: 'CPU temperature',
+    inlettemp: 'Inlet temperature',
+    watts: 'Power usage',
+    storage: 'Storage health',
+    ssdlife: 'SSD lifetime',
+    firmware: 'iLO firmware',
+    network: 'Network',
+    serial: 'Serial number',
+    minfan: 'Minimum fan speed',
+    thermalconfig: 'Thermal configuration',
+    powerregulator: 'Power regulator',
+  };
+
+  // Default icon of every row (js/components/hpilo.js METRICS) and the icons
+  // a row can be switched to. Stored per row in the hidden hpilo_icons field
+  // as JSON, {"power": "fas fa-bolt"}: absent = the row's own default icon,
+  // 'none' = no icon.
+  var HPILO_DEFAULT_ICONS = {
+    name: 'fas fa-server',
+    model: 'fas fa-microchip',
+    power: 'fas fa-power-off',
+    health: 'fas fa-heart-pulse',
+    uptime: 'fas fa-clock',
+    fanspeed: 'fas fa-fan',
+    cputemp: 'fas fa-temperature-half',
+    inlettemp: 'fas fa-temperature-half',
+    watts: 'fas fa-bolt',
+    storage: 'fas fa-hard-drive',
+    ssdlife: 'fas fa-hard-drive',
+    firmware: 'fas fa-code-branch',
+    network: 'fas fa-network-wired',
+    serial: 'fas fa-barcode',
+    minfan: 'fas fa-fan',
+    thermalconfig: 'fas fa-gauge-high',
+    powerregulator: 'fas fa-plug',
+  };
+
+  var HPILO_ICON_PRESETS = [
+    ['fas fa-server', 'Server'],
+    ['fas fa-power-off', 'Power'],
+    ['fas fa-heart-pulse', 'Health'],
+    ['fas fa-clock', 'Clock'],
+    ['fas fa-fan', 'Fan'],
+    ['fas fa-temperature-half', 'Temperature'],
+    ['fas fa-thermometer-half', 'Thermometer'],
+    ['fas fa-bolt', 'Energy'],
+    ['fas fa-plug', 'Plug'],
+    ['fas fa-gauge-high', 'Gauge'],
+    ['fas fa-hard-drive', 'Storage'],
+    ['fas fa-microchip', 'Chip'],
+    ['fas fa-memory', 'Memory'],
+    ['fas fa-network-wired', 'Network'],
+    ['fas fa-wifi', 'Wifi'],
+    ['fas fa-code-branch', 'Firmware'],
+    ['fas fa-barcode', 'Serial'],
+    ['fas fa-fire', 'Heating'],
+    ['fas fa-snowflake', 'Cooling'],
+    ['fas fa-droplet', 'Humidity'],
+    ['fas fa-shield-halved', 'Security'],
+    ['fas fa-circle-check', 'OK'],
+    ['fas fa-triangle-exclamation', 'Warning'],
+    ['fas fa-circle-info', 'Info'],
+  ];
+
+  // hpilo_icons value (JSON text) -> {rowKey: icon}, known rows and safe
+  // class strings only.
+  function _hpiloIconsMap(value) {
+    var parsed = {};
+    try {
+      parsed = typeof value === 'object' ? value : JSON.parse(value || '{}');
+    } catch (e) {
+      parsed = {};
+    }
+    var result = {};
+    Object.keys(parsed || {}).forEach(function (key) {
+      var icon = String(parsed[key] || '');
+      if (HPILO_ROWS[key] && /^[A-Za-z0-9 _-]{1,60}$/.test(icon)) {
+        result[key] = icon;
+      }
+    });
+    return result;
+  }
+
+  // The pull-down of one row: a button with the row's current icon and a
+  // panel of icon-only choices (names as tooltip).
+  function _hpiloIconPickerHtml(key, icons, lh) {
+    var current = icons[key] || '';
+    var shown = current === 'none' ? '' : current || HPILO_DEFAULT_ICONS[key];
+    var html =
+      '<span class="we-hpilo-icon-wrap" style="position:relative;flex:0 0 auto;">' +
+      '<button type="button" class="btn btn-outline-secondary btn-sm we-hpilo-icon-toggle"' +
+      ' aria-haspopup="true" title="' +
+      _esc(lh.hpilo_row_icon || 'Icon for this row') +
+      '" style="min-width:3.5em;">' +
+      (shown
+        ? '<i class="' + _esc(shown) + '" aria-hidden="true"></i>'
+        : _esc(lh.hpilo_icon_none || 'None')) +
+      ' <span aria-hidden="true">&#9662;</span></button>' +
+      '<span class="we-hpilo-icon-panel d-none" style="position:absolute;top:100%;right:0;z-index:1060;width:max-content;min-width:4em;max-height:260px;overflow-x:hidden;overflow-y:auto;padding:4px;margin-top:2px;border:1px solid rgba(128,128,128,.5);border-radius:6px;background:var(--bs-body-bg,#fff);box-shadow:0 4px 12px rgba(0,0,0,.35);">';
+    [
+      ['', lh.hpilo_icon_default || 'Default'],
+      ['none', lh.hpilo_icon_none || 'None'],
+    ].forEach(function (choice) {
+      html +=
+        '<button type="button" class="btn btn-sm d-block w-100 text-center we-hpilo-icon-choice' +
+        (current === choice[0] ? ' active' : '') +
+        '" data-icon="' +
+        choice[0] +
+        '">' +
+        _esc(choice[1]) +
+        '</button>';
+    });
+    HPILO_ICON_PRESETS.forEach(function (p) {
+      html +=
+        '<button type="button" class="btn btn-sm d-block w-100 text-center we-hpilo-icon-choice' +
+        (current === p[0] ? ' active' : '') +
+        '" data-icon="' +
+        _esc(p[0]) +
+        '" title="' +
+        _esc(p[1]) +
+        '" aria-label="' +
+        _esc(p[1]) +
+        '"><i class="' +
+        _esc(p[0]) +
+        '" aria-hidden="true"></i></button>';
+    });
+    return html + '</span></span>';
+  }
+
+  function _hpiloRowLabel(key) {
+    var misc = (typeof language !== 'undefined' && language.misc) || {};
+    return misc['hpilo_' + key] || HPILO_ROWS[key];
+  }
+
+  function _hpiloRowKeys(value) {
+    var seen = {};
+    return String(value || '')
+      .split(',')
+      .map(function (key) {
+        return $.trim(key);
+      })
+      .filter(function (key) {
+        if (!HPILO_ROWS[key] || seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+  }
+
+  function _hpiloRowsInnerHtml(keys, icons) {
+    icons = icons || {};
+    var lng =
+      typeof language !== 'undefined' && language.settings
+        ? language.settings
+        : {};
+    var lh = lng.hpilo || {};
+    var options =
+      '<option value="">— ' +
+      _esc(lh.hpilo_rows_select || 'Select a row') +
+      ' —</option>';
+    Object.keys(HPILO_ROWS).forEach(function (key) {
+      if (keys.indexOf(key) === -1) {
+        options +=
+          '<option value="' +
+          _esc(key) +
+          '">' +
+          _esc(_hpiloRowLabel(key)) +
+          '</option>';
+      }
+    });
+    var list = keys.length
+      ? keys
+          .map(function (key) {
+            return (
+              '<div class="de-device-item we-hpilo-item" data-key="' +
+              _esc(key) +
+              '" draggable="true">' +
+              '<span class="de-drag-handle" title="' +
+              _esc(lh.hpilo_rows_drag || 'Drag to reorder') +
+              '"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>' +
+              '<span class="we-hpilo-name">' +
+              _esc(_hpiloRowLabel(key)) +
+              '</span>' +
+              '<span class="ms-auto"></span>' +
+              _hpiloIconPickerHtml(key, icons, lh) +
+              '<button type="button" class="btn btn-outline-danger btn-sm we-hpilo-remove"' +
+              ' title="' +
+              _esc(lh.hpilo_rows_remove || 'Remove') +
+              '"><i class="fas fa-minus" aria-hidden="true"></i></button>' +
+              '</div>'
+            );
+          })
+          .join('')
+      : '<div class="de-empty">' +
+        _esc(lh.hpilo_rows_none || 'No rows added yet.') +
+        '</div>';
+    return { options: options, list: list };
+  }
+
+  function _hpiloRowsFieldHtml(value, iconsValue) {
+    var lng =
+      typeof language !== 'undefined' && language.settings
+        ? language.settings
+        : {};
+    var lh = lng.hpilo || {};
+    var keys = _hpiloRowKeys(value);
+    var icons = _hpiloIconsMap(iconsValue);
+    var inner = _hpiloRowsInnerHtml(keys, icons);
+    return (
+      '<div class="mb-3 we-cfg-field" id="we-hpilo-rows">' +
+      '<label class="form-label we-field-label">' +
+      _esc(lh.hpilo_rows || 'Rows') +
+      '</label>' +
+      '<input type="hidden" class="we-widget-field" id="we-cfg-hpilo-rows" data-cfg-key="hpilo_rows" value="' +
+      _esc(keys.join(',')) +
+      '">' +
+      '<input type="hidden" class="we-widget-field" id="we-cfg-hpilo-icons" data-cfg-key="hpilo_icons" value="' +
+      _esc(JSON.stringify(icons)) +
+      '">' +
+      '<div class="d-flex gap-2">' +
+      '<select class="form-select form-select-sm" id="we-hpilo-select">' +
+      inner.options +
+      '</select>' +
+      '<button type="button" class="btn btn-sm dt-btn-green" id="we-hpilo-add"><i class="fas fa-plus" aria-hidden="true"></i></button>' +
+      '</div>' +
+      '<div class="form-text">' +
+      _esc(
+        lh.hpilo_rows_help ||
+          'Pick a row and click + to add it. The order below is the order on the tile.'
+      ) +
+      '</div>' +
+      '<div id="we-hpilo-list" class="mt-2">' +
+      inner.list +
+      '</div></div>'
+    );
+  }
+
   function _buildConfigModalHtml(item) {
     var fields = '';
+    var fontFieldHtml = '';
     var lng =
       typeof language !== 'undefined' && language.settings
         ? language.settings
@@ -3050,23 +3604,23 @@ var DashticzWidgetEditor = (function () {
     var lw = lng.weather || {};
     var ll = lng.localize || {};
     var lg = lng.garbage || {};
+    var lp = lng.postnl || {};
+    var lh = lng.hpilo || {};
     var lm = lng.media || {};
-    // Radio's Add station control docks next to the Display options
-    // checkboxes rather than living on every station row.
-    var blockOptionsExtraButton = '';
-    var blockOptionsInsertHtml = '';
 
     if (item.id === 'weather') {
       var cfg = widgetConfigs.weather || {};
+      // Translated via lang/*.json settings.weather.icons_* (English text
+      // below is only the fallback).
       var iconOpts = {
-        line: 'Dynamic line icons',
-        linestatic: 'Static version of the line icons',
-        fill: 'Dynamic filled icons',
-        static: 'Static icons',
-        meteo: 'Alternative set of static icons',
+        line: lw.icons_line || 'Dynamic line icons',
+        linestatic: lw.icons_linestatic || 'Static version of the line icons',
+        fill: lw.icons_fill || 'Dynamic filled icons',
+        static: lw.icons_static || 'Static icons',
+        meteo: lw.icons_meteo || 'Alternative set of static icons',
       };
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-weather-provider">' +
         _t('provider', 'Provider') +
         '</label>' +
@@ -3122,9 +3676,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'owm_cnt',
         lw.owm_cnt || 'Number of periods',
-        'text',
+        'number',
         cfg.owm_cnt,
-        null,
+        { min: 1, max: 40, step: 1 },
         lw.owm_cnt_help || ''
       );
       fields += _cfgField(
@@ -3220,11 +3774,10 @@ var DashticzWidgetEditor = (function () {
         fields += _calendarRowHtml(source, index);
       });
       fields += '</div>';
-      fields +=
-        '<button type="button" class="btn btn-sm btn-outline-success mb-3" id="we-calendar-add">' +
-        '<i class="fas fa-plus me-1" aria-hidden="true"></i>' +
-        _t('calendar_add', 'Add calendar') +
-        '</button>';
+      fields += _addButtonHtml(
+        'we-calendar-add',
+        _t('calendar_add', 'Add calendar')
+      );
       fields += _cfgField(
         'calendarformat',
         ll.calendarformat || 'Calendar format',
@@ -3241,9 +3794,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'calendar_maxitems',
         ll.calendar_maxitems || 'Visible calendar rows',
-        'text',
+        'number',
         ccal.calendar_maxitems,
-        null,
+        { min: 1, max: 100, step: 1 },
         ll.calendar_maxitems_help ||
           'Maximum number of calendar rows to display. Default: 15.'
       );
@@ -3308,7 +3861,7 @@ var DashticzWidgetEditor = (function () {
       var currentClockType = ccfg.clockType || 'basicclock';
       var showSizeScale = currentClockType !== 'miniclock';
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-clock-type">' +
         _t('clock_type', 'Clock type') +
         '</label>' +
@@ -3351,9 +3904,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'scale',
         _t('scale', 'Scale'),
-        'text',
+        'number',
         ccfg.scale,
-        null,
+        { min: 0.1, max: 5, step: 0.05 },
         _t('scale_help', 'For example 0.75 (default 1)')
       );
       fields += '</div>';
@@ -3455,6 +4008,8 @@ var DashticzWidgetEditor = (function () {
       fields += '</div>';
     } else if (item.id === 'garbage') {
       var gcfg = widgetConfigs.garbage || {};
+      // Company/Service keeps its own full-width line; the other text fields
+      // sit in two columns and the switches below three per row.
       fields += _cfgField(
         'garbage_company',
         lg.garbage_company || 'Company / Service',
@@ -3462,6 +4017,7 @@ var DashticzWidgetEditor = (function () {
         gcfg.garbage_company,
         _GARBAGE_COMPANIES
       );
+      fields += '<div class="we-cfg-cols">';
       fields += _cfgField(
         'garbage_zipcode',
         lg.garbage_zipcode || 'Postcode',
@@ -3489,19 +4045,22 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'garbage_maxitems',
         lg.garbage_maxitems || 'Maximum items',
-        'text',
-        gcfg.garbage_maxitems
+        'number',
+        gcfg.garbage_maxitems,
+        { min: 1, max: 50, step: 1 }
       );
       fields += _cfgField(
         'garbage_maxdays',
         lg.garbage_maxdays || 'Maximum days',
-        'text',
+        'number',
         gcfg.garbage_maxdays,
-        null,
+        { min: 1, max: 365, step: 1 },
         lg.garbage_maxdays_help ||
           'Maximum number of days ahead to search. Default: 32.'
       );
+      fields += '</div>';
       fields += _cfgHeading(_t('ical_google', 'iCal / Google'));
+      fields += '<div class="we-cfg-cols">';
       fields += _cfgField(
         'garbage_icalurl',
         lg.garbage_icalurl || 'iCal URL',
@@ -3522,7 +4081,11 @@ var DashticzWidgetEditor = (function () {
         null,
         lg.garbage_calendar_id_help || ''
       );
-      fields += '<div class="we-switch-grid">';
+      fields += '</div>';
+      // js/garbageconfig.js puts its Bin scale field first in this row, so
+      // scale + Hide icon + Icon colors share one line.
+      fields +=
+        '<div class="we-switch-grid we-switch-grid-three garbage-icon-row">';
       fields += _cfgField(
         'garbage_hideicon',
         lg.garbage_hideicon || 'Hide icon',
@@ -3535,6 +4098,8 @@ var DashticzWidgetEditor = (function () {
         'checkbox',
         gcfg.garbage_icon_use_colors
       );
+      fields += '</div>';
+      fields += '<div class="we-switch-grid we-switch-grid-three">';
       fields += _cfgField(
         'garbage_use_colors',
         lg.garbage_use_colors || 'Use colors',
@@ -3580,6 +4145,140 @@ var DashticzWidgetEditor = (function () {
         'color',
         gcfg.garbage_row2_color
       );
+    } else if (item.id === 'postnl') {
+      var pncfg = widgetConfigs.postnl || {};
+      var pnStart = fields.length;
+      fields += _cfgField(
+        'postnl_username',
+        lp.postnl_username || 'PostNL e-mail address',
+        'text',
+        pncfg.postnl_username
+      );
+      fields += _cfgField(
+        'postnl_password',
+        lp.postnl_password || 'PostNL password',
+        'password',
+        pncfg.postnl_password
+      );
+      fields += _cfgField(
+        'postnl_showdelivered',
+        lp.postnl_showdelivered || 'Show delivered packages',
+        'checkbox',
+        pncfg.postnl_showdelivered
+      );
+      fields += _cfgField(
+        'postnl_days',
+        lp.postnl_days || 'Show delivered for (days)',
+        'number',
+        pncfg.postnl_days || '2',
+        { min: 1, max: 30, step: 1 },
+        lp.postnl_days_help ||
+          'How many days a package stays visible after delivery. Default: 2.'
+      );
+      fields += _cfgField(
+        'postnl_pollminutes',
+        lp.postnl_pollminutes || 'Poll interval (minutes)',
+        'number',
+        pncfg.postnl_pollminutes || '60',
+        { min: 15, max: 720, step: 15 },
+        lp.postnl_pollminutes_help ||
+          'Minimum 15 minutes, to avoid your PostNL account being flagged. Default: 60.'
+      );
+      fontFieldHtml = _cfgField(
+        'postnl_fontsize',
+        lp.postnl_fontsize || 'Font size (px)',
+        'number',
+        pncfg.postnl_fontsize || '14',
+        { min: 8, max: 60, step: 1 },
+        lp.postnl_fontsize_help ||
+          'Font size of the shipment text. Default: 14.'
+      );
+      // Icon style and the three colors share one row across both columns
+      // (css/config-typography.css .we-cfg-inline).
+      fields += '<div class="we-cfg-inline">';
+      fields += _cfgField(
+        'postnl_iconstyle',
+        lp.postnl_iconstyle || 'Icon style',
+        'select',
+        pncfg.postnl_iconstyle || 'fa',
+        {
+          fa: lp.postnl_iconstyle_fa || 'Font Awesome',
+          emoji: lp.postnl_iconstyle_emoji || 'Emoji (colorful)',
+        }
+      );
+      fields += _cfgField(
+        'postnl_date_color',
+        lp.postnl_date_color || 'Date color',
+        'color',
+        pncfg.postnl_date_color,
+        { default: '#ffffff' }
+      );
+      fields += _cfgField(
+        'postnl_time_color',
+        lp.postnl_time_color || 'Time color',
+        'color',
+        pncfg.postnl_time_color,
+        { default: '#ffff00' }
+      );
+      fields += _cfgField(
+        'postnl_text_color',
+        lp.postnl_text_color || 'Text color',
+        'color',
+        pncfg.postnl_text_color,
+        { default: '#2e9e5b' }
+      );
+      fields += '</div>';
+      fields =
+        fields.slice(0, pnStart) +
+        '<div class="we-cfg-cols">' +
+        fields.slice(pnStart) +
+        '</div>';
+    } else if (item.id === 'hpilo') {
+      var hcfg = widgetConfigs.hpilo || {};
+      fields += _cfgField(
+        'hpilo_host',
+        lh.hpilo_host || 'iLO IP address / hostname',
+        'text',
+        hcfg.hpilo_host
+      );
+      fields += _cfgField(
+        'hpilo_port',
+        lh.hpilo_port || 'Port',
+        'number',
+        hcfg.hpilo_port || '443',
+        { min: 1, max: 65535, step: 1 },
+        lh.hpilo_port_help || 'HTTPS port of the iLO. Default: 443.'
+      );
+      fields += _cfgField(
+        'hpilo_username',
+        lh.hpilo_username || 'Username',
+        'text',
+        hcfg.hpilo_username
+      );
+      fields += _cfgField(
+        'hpilo_password',
+        lh.hpilo_password || 'Password',
+        'password',
+        hcfg.hpilo_password
+      );
+      fields += _cfgField(
+        'hpilo_pollseconds',
+        lh.hpilo_pollseconds || 'Poll interval (sec)',
+        'number',
+        hcfg.hpilo_pollseconds || '300',
+        { min: 30, max: 86400, step: 10 },
+        lh.hpilo_pollseconds_help ||
+          'Minimum 30 seconds; the iLO is a slow management processor. Default: 300.'
+      );
+      fontFieldHtml = _cfgField(
+        'hpilo_fontsize',
+        lh.hpilo_fontsize || 'Font size (px)',
+        'number',
+        hcfg.hpilo_fontsize || '14',
+        { min: 8, max: 60, step: 1 },
+        lh.hpilo_fontsize_help || 'Font size of the rows. Default: 14.'
+      );
+      fields += _hpiloRowsFieldHtml(hcfg.hpilo_rows, hcfg.hpilo_icons);
     } else if (item.id === 'sonarr') {
       var scfg = widgetConfigs.sonarr || {};
       fields += _cfgField(
@@ -3597,8 +4296,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'sonarr_maxitems',
         lm.sonarr_maxitems || 'Maximum items',
-        'text',
-        scfg.sonarr_maxitems
+        'number',
+        scfg.sonarr_maxitems,
+        { min: 1, max: 100, step: 1 }
       );
     } else if (item.id === 'spotify') {
       var spcfg = widgetConfigs.spotify || {};
@@ -3611,7 +4311,7 @@ var DashticzWidgetEditor = (function () {
     } else if (item.id === 'publictransport') {
       var ptcfg = widgetConfigs.publictransport || {};
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-pt-provider">' +
         _t('provider', 'Provider') +
         '</label>' +
@@ -3627,7 +4327,7 @@ var DashticzWidgetEditor = (function () {
         _ptOption('delijnbe', 'De Lijn (BE)', ptcfg.provider || 'treinen') +
         '</select></div>';
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-pt-station">' +
         _t('station_stop', 'Station / stop') +
         '</label>' +
@@ -3641,12 +4341,13 @@ var DashticzWidgetEditor = (function () {
       // Rijkswaterstaat only - no provider choice (see AGENTS.md-tracked
       // history: ANWB no longer issues API keys, and a Custom endpoint
       // added no real value without a second built-in provider to compare
-      // against). trafficJams/roadWorks/radars/results/maxDistance/
+      // against). trafficJams/roadWorks/results/maxDistance/
       // latitude/longitude are per-block CONFIG.js properties (see
       // managedWidgetPropertiesById.trafficinfo and the hydration in
       // _readConfiguredWidgets()/_hydrateGridWidget() above).
       var tcfg = widgetConfigs.trafficinfo || {};
       var lwgt = lng.widgets || {};
+      fields += '<div class="we-switch-grid we-switch-grid-three">';
       fields += _cfgField(
         'trafficJams',
         lwgt.traffic_jams || 'Traffic jams',
@@ -3663,13 +4364,19 @@ var DashticzWidgetEditor = (function () {
         null,
         lwgt.traffic_roadworks_help || ''
       );
+      fields += '</div>';
+      var trafficFilter = tcfg.filter === 'roads' ? 'roads' : 'distance';
       fields += _cfgField(
-        'radars',
-        lwgt.traffic_radars || 'Radars',
-        'checkbox',
-        typeof tcfg.radars === 'undefined' ? 1 : tcfg.radars,
-        null,
-        lwgt.traffic_radars_help || ''
+        'filter',
+        lwgt.traffic_filter || 'Show',
+        'select',
+        trafficFilter,
+        {
+          distance:
+            lwgt.traffic_filter_distance || 'Everything within a distance',
+          roads: lwgt.traffic_filter_roads || 'Selected roads',
+        },
+        lwgt.traffic_filter_help || ''
       );
       fields += _cfgField(
         'results',
@@ -3679,6 +4386,33 @@ var DashticzWidgetEditor = (function () {
         { min: 1, step: 1 },
         lwgt.traffic_results_help || ''
       );
+      // Roads: only the listed roads, in that order (Distance is ignored).
+      fields +=
+        '<div class="we-traffic-group" data-traffic-filter="roads"' +
+        (trafficFilter === 'roads' ? '' : ' style="display:none"') +
+        '>';
+      fields += _cfgField(
+        'road',
+        lwgt.traffic_roads || 'Roads',
+        'text',
+        tcfg.road || '',
+        null,
+        lwgt.traffic_roads_help || ''
+      );
+      fields += _cfgField(
+        'showemptyroads',
+        lwgt.traffic_showemptyroads || 'Show roads without announcements',
+        'checkbox',
+        tcfg.showemptyroads ? 1 : 0,
+        null,
+        lwgt.traffic_showemptyroads_help || ''
+      );
+      fields += '</div>';
+      // Distance: everything within maxDistance of latitude/longitude.
+      fields +=
+        '<div class="we-traffic-group" data-traffic-filter="distance"' +
+        (trafficFilter === 'distance' ? '' : ' style="display:none"') +
+        '>';
       fields += _cfgField(
         'maxDistance',
         lwgt.traffic_max_distance || 'Max distance (km)',
@@ -3703,10 +4437,11 @@ var DashticzWidgetEditor = (function () {
         null,
         lwgt.traffic_location_help || ''
       );
+      fields += '</div>';
     } else if (item.id === 'alarmmeldingen') {
       var acfg = widgetConfigs.alarmmeldingen || {};
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-alarm-rss">' +
         _t('rss_feed', 'RSS feed') +
         '</label>' +
@@ -3714,7 +4449,7 @@ var DashticzWidgetEditor = (function () {
         _esc(acfg.rss || '') +
         '"></div>';
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-alarm-filter">' +
         _t('filter_optional', 'Filter (optional)') +
         '</label>' +
@@ -3735,10 +4470,7 @@ var DashticzWidgetEditor = (function () {
       });
       fields +=
         '</div>' +
-        '<button type="button" class="btn btn-sm btn-outline-primary" id="we-camera-add">' +
-        '<i class="fas fa-plus me-1" aria-hidden="true"></i>' +
-        _t('camera_add', 'Add camera') +
-        '</button>';
+        _addButtonHtml('we-camera-add', _t('camera_add', 'Add camera'));
     } else if (item.id === 'map') {
       var mcfg = widgetConfigs.map || {};
       fields += _cfgField(
@@ -3782,15 +4514,16 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'news_scroll_after',
         lg2.news_scroll_after || 'Scroll after (seconds)',
-        'text',
-        ncfg.news_scroll_after
+        'number',
+        ncfg.news_scroll_after,
+        { min: 1, max: 3600, step: 1 }
       );
     } else if (item.id === 'iframe') {
       // Config fields for the iframe widget
       var icfg = widgetConfigs.iframe || {};
       var li = lng.widgeteditor || {};
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-iframe-url">' +
         (li.iframe_url || 'URL') +
         ' <span class="text-danger" aria-hidden="true">*</span></label>' +
@@ -3820,18 +4553,18 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'iframe_scaletofit',
         li.iframe_scaletofit || 'Scale-to-fit width (px)',
-        'text',
+        'number',
         icfg.scaletofit,
-        null,
+        { min: 1, max: 10000, step: 1 },
         li.iframe_scaletofit_help ||
           'Design width of the embedded page (e.g. 1024). The page will be scaled so it fits the tile width. Leave empty to disable scaling.'
       );
       fields += _cfgField(
         'iframe_aspectratio',
         li.iframe_aspectratio || 'Aspect ratio',
-        'text',
+        'number',
         icfg.aspectratio,
-        null,
+        { min: 0.01, max: 10, step: 0.01 },
         li.iframe_aspectratio_help ||
           'Height divided by width (for example 0.9). When set, no fixed height is written.'
       );
@@ -3844,9 +4577,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'iframe_refresh',
         li.iframe_refresh || 'Refresh interval (seconds)',
-        'text',
+        'number',
         icfg.refresh,
-        null,
+        { min: 0, max: 86400, step: 1 },
         li.iframe_refresh_help ||
           'How often to reload the iframe. Default: 300 seconds.'
       );
@@ -3855,7 +4588,7 @@ var DashticzWidgetEditor = (function () {
       var xcfg = widgetConfigs.xmltvguide || {};
       var lx = lng.widgeteditor || {};
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-xmltv-url">' +
         (lx.xmltv_url || 'XMLTV URL') +
         ' <span class="text-danger" aria-hidden="true">*</span></label>' +
@@ -3879,9 +4612,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'xmltv_maxitems',
         lx.xmltv_maxitems || 'Max items',
-        'text',
+        'number',
         xcfg.maxitems,
-        null,
+        { min: 1, max: 100, step: 1 },
         lx.xmltv_maxitems_help ||
           'Maximum number of programme rows to display (default: 10).'
       );
@@ -3907,29 +4640,27 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'xmltv_refresh',
         lx.xmltv_refresh || 'Refresh interval (seconds)',
-        'text',
+        'number',
         xcfg.refresh,
-        null,
+        { min: 0, max: 86400, step: 1 },
         lx.xmltv_refresh_help ||
           'How often to refresh the widget from the cached XMLTV data.'
       );
     } else if (item.id === 'radio') {
       // Config fields for the Radio (Streamplayer) widget: a graphical builder
       // for the same tracks:[{name,file}] array _STREAMPLAYER_TRACKS already uses.
-      // The Add station control is shown once, next to the Display options
-      // checkboxes (see _widgetBlockOptionsHtml), and every row only keeps
-      // its own Remove button.
+      // One Add station button below the list, like Calendar/Camera; every
+      // row only keeps its own Remove button.
       var rcfg = _radioWidgetConfig();
-      var radioListHtml = '<div id="we-cfg-radio-list">';
+      fields += '<div id="we-cfg-radio-list">';
       rcfg.tracks.forEach(function (station, index) {
-        radioListHtml += _radioStationRowHtml(station, index);
+        fields += _radioStationRowHtml(station, index);
       });
-      radioListHtml += '</div>';
-      blockOptionsInsertHtml = radioListHtml;
-      blockOptionsExtraButton =
-        '<button type="button" class="btn btn-sm btn-outline-success" id="we-radio-add-btn" title="' +
-        _t('radio_add', 'Add station') +
-        '"><i class="fas fa-plus" aria-hidden="true"></i></button>';
+      fields += '</div>';
+      fields += _addButtonHtml(
+        'we-radio-add-btn',
+        _t('radio_add', 'Add station')
+      );
     } else if (item.id === 'log') {
       // Config fields for the Domoticz log widget. Field keys match
       // widgetConfigs.log's own property names 1:1, so the OK handler can
@@ -3954,9 +4685,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'maxitems',
         llog.log_maxitems || 'Maximum lines',
-        'text',
+        'number',
         logcfg.maxitems,
-        null,
+        { min: 1, max: 1000, step: 1 },
         llog.log_maxitems_help ||
           'Limit the number of log lines shown, so no scrollbar is needed. Leave empty for no limit.'
       );
@@ -3972,9 +4703,9 @@ var DashticzWidgetEditor = (function () {
       fields += _cfgField(
         'aspectratio',
         llog.log_aspectratio || 'Aspect ratio',
-        'text',
+        'number',
         logcfg.aspectratio,
-        null,
+        { min: 0.01, max: 10, step: 0.01 },
         llog.log_aspectratio_help ||
           'Height divided by width. Only used when Height above is left empty.'
       );
@@ -4029,7 +4760,7 @@ var DashticzWidgetEditor = (function () {
       var tgcfg = widgetConfigs.timegraph || {};
       var ltg = lng.widgeteditor || {};
       fields +=
-        '<div class="mb-3">' +
+        '<div class="mb-3 we-cfg-field">' +
         '<label class="form-label we-field-label" for="we-cfg-idx">' +
         (ltg.timegraph_idx || 'Main IDX') +
         '</label>' +
@@ -4128,18 +4859,29 @@ var DashticzWidgetEditor = (function () {
         fields += _timegraphValueRowHtml(row, index);
       });
       fields += '</div>';
+      fields += _addButtonHtml(
+        'we-timegraph-add',
+        _t('timegraph_add_value', 'Add value')
+      );
     }
 
+    // Point order for every widget: Display options, the widget's own
+    // Settings in the shared two-column grid (css/creative.css
+    // .we-settings-grid), then Custom fields last.
     fields =
-      _widgetBlockOptionsHtml(
-        item,
-        blockOptionsExtraButton,
-        blockOptionsInsertHtml
-      ) + fields;
+      _widgetBlockOptionsHtml(item) +
+      fontFieldHtml +
+      (fields
+        ? _cfgHeading(_t('settings', 'Settings')) +
+          '<div class="we-settings-grid">' +
+          fields +
+          '</div>'
+        : '') +
+      _widgetCustomFieldsHtml(item);
 
     return (
       '<div class="modal fade" id="we-config-popup" tabindex="-1" aria-labelledby="we-cfg-title" aria-hidden="true" data-bs-backdrop="static">' +
-      '<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">' +
+      '<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">' +
       '<div class="modal-content">' +
       '<div class="modal-header">' +
       '<h5 class="modal-title" id="we-cfg-title"><i class="fas fa-cog me-2" aria-hidden="true"></i>' +
@@ -4183,6 +4925,10 @@ var DashticzWidgetEditor = (function () {
     $('body').append(_buildConfigModalHtml(item));
 
     var $cfgModal = $('#we-config-popup');
+
+    function hideCfgModal() {
+      _hideModal(document.getElementById('we-config-popup'));
+    }
 
     function refreshCustomFieldButtons() {
       var removable = $cfgModal.find(
@@ -4335,6 +5081,15 @@ var DashticzWidgetEditor = (function () {
       });
     });
 
+    $cfgModal.on('change', '#we-cfg-filter', function () {
+      var trafficFilter = $(this).val() === 'roads' ? 'roads' : 'distance';
+      $cfgModal.find('.we-traffic-group').each(function () {
+        $(this).toggle(
+          String($(this).data('traffic-filter')) === trafficFilter
+        );
+      });
+    });
+
     $cfgModal.on('change', '#we-cfg-clock-type', function () {
       var type = $(this).val() || 'basicclock';
       $cfgModal.find('.we-clock-group').each(function () {
@@ -4344,6 +5099,124 @@ var DashticzWidgetEditor = (function () {
       $cfgModal
         .find('#we-cfg-clock-preview')
         .attr('src', _clockPreviewSrc(type));
+    });
+
+    function hpiloIcons() {
+      return _hpiloIconsMap($cfgModal.find('#we-cfg-hpilo-icons').val());
+    }
+
+    function hpiloSetRows(keys, icons) {
+      icons = icons || hpiloIcons();
+      // Only rows still on the tile keep their icon choice.
+      var kept = {};
+      keys.forEach(function (key) {
+        if (icons[key]) kept[key] = icons[key];
+      });
+      var inner = _hpiloRowsInnerHtml(keys, kept);
+      $cfgModal.find('#we-cfg-hpilo-icons').val(JSON.stringify(kept));
+      $cfgModal.find('#we-cfg-hpilo-rows').val(keys.join(','));
+      $cfgModal.find('#we-hpilo-select').html(inner.options);
+      $cfgModal.find('#we-hpilo-list').html(inner.list);
+    }
+
+    function hpiloRows() {
+      return _hpiloRowKeys($cfgModal.find('#we-cfg-hpilo-rows').val());
+    }
+
+    $cfgModal.on('click', '#we-hpilo-add', function () {
+      var key = $cfgModal.find('#we-hpilo-select').val();
+      if (!HPILO_ROWS[key]) return;
+      hpiloSetRows(hpiloRows().concat([key]));
+    });
+
+    $cfgModal.on('click', '.we-hpilo-remove', function () {
+      var key = String($(this).closest('.we-hpilo-item').data('key'));
+      hpiloSetRows(
+        hpiloRows().filter(function (row) {
+          return row !== key;
+        })
+      );
+    });
+
+    $cfgModal.on('click', '.we-hpilo-icon-toggle', function () {
+      var $panel = $(this).siblings('.we-hpilo-icon-panel');
+      $cfgModal.find('.we-hpilo-icon-panel').not($panel).addClass('d-none');
+      $panel.toggleClass('d-none');
+    });
+
+    $cfgModal.on('click', '.we-hpilo-icon-choice', function () {
+      var key = String($(this).closest('.we-hpilo-item').data('key'));
+      var icons = hpiloIcons();
+      var icon = String($(this).attr('data-icon') || '');
+      if (icon) icons[key] = icon;
+      else delete icons[key];
+      hpiloSetRows(hpiloRows(), icons);
+    });
+
+    $cfgModal.on('click', function (event) {
+      if (
+        !$(event.target).closest('.we-hpilo-icon-toggle, .we-hpilo-icon-panel')
+          .length
+      )
+        $cfgModal.find('.we-hpilo-icon-panel').addClass('d-none');
+    });
+
+    // Drag-and-drop reordering, same behaviour as the Device Editor's list.
+    var hpiloDragEl = null;
+    var hpiloDragClasses = 'de-drag-over-top de-drag-over-bottom';
+
+    $cfgModal.on('dragstart', '.we-hpilo-item', function (e) {
+      hpiloDragEl = this;
+      e.originalEvent.dataTransfer.effectAllowed = 'move';
+      e.originalEvent.dataTransfer.setData(
+        'text/plain',
+        String($(this).attr('data-key'))
+      );
+      $(this).addClass('de-drag-dragging');
+    });
+
+    $cfgModal.on('dragend', '.we-hpilo-item', function () {
+      hpiloDragEl = null;
+      $(this).removeClass('de-drag-dragging');
+      $cfgModal.find('.we-hpilo-item').removeClass(hpiloDragClasses);
+    });
+
+    $cfgModal.on('dragover', '.we-hpilo-item', function (e) {
+      if (!hpiloDragEl) return;
+      e.preventDefault();
+      e.originalEvent.dataTransfer.dropEffect = 'move';
+      if (this === hpiloDragEl) return;
+      var rect = this.getBoundingClientRect();
+      var above = e.originalEvent.clientY < rect.top + rect.height / 2;
+      $(this)
+        .toggleClass('de-drag-over-top', above)
+        .toggleClass('de-drag-over-bottom', !above);
+    });
+
+    $cfgModal.on('dragleave', '.we-hpilo-item', function (e) {
+      /* only clear when leaving the item itself, not a child */
+      if (!this.contains(e.originalEvent.relatedTarget)) {
+        $(this).removeClass(hpiloDragClasses);
+      }
+    });
+
+    $cfgModal.on('drop', '.we-hpilo-item', function (e) {
+      if (!hpiloDragEl) return;
+      e.preventDefault();
+      if (this === hpiloDragEl) return;
+      var rect = this.getBoundingClientRect();
+      var above = e.originalEvent.clientY < rect.top + rect.height / 2;
+      if (above) {
+        $(this).before(hpiloDragEl);
+      } else {
+        $(this).after(hpiloDragEl);
+      }
+      $(this).removeClass(hpiloDragClasses);
+      var keys = [];
+      $cfgModal.find('.we-hpilo-item').each(function () {
+        keys.push(String($(this).attr('data-key')));
+      });
+      $cfgModal.find('#we-cfg-hpilo-rows').val(keys.join(','));
     });
 
     $cfgModal.on('click', '#we-calendar-add', function () {
@@ -4452,11 +5325,9 @@ var DashticzWidgetEditor = (function () {
         );
     }
 
-    $cfgModal.on('click', '.we-timegraph-value-add', function () {
+    $cfgModal.on('click', '#we-timegraph-add', function () {
       var index = $cfgModal.find('.we-timegraph-value-row').length;
-      $(this)
-        .closest('.we-timegraph-value-row')
-        .after(_timegraphValueRowHtml({}, index));
+      $('#we-cfg-timegraph-list').append(_timegraphValueRowHtml({}, index));
       _renumberTimegraphValueRows();
       $cfgModal
         .find('.we-timegraph-value-row')
@@ -4494,7 +5365,7 @@ var DashticzWidgetEditor = (function () {
         hide_data: $hideDataButton.length
           ? !$hideDataButton.hasClass('active')
           : existingBlockOptions.hide_data === true,
-        last_update: existingBlockOptions.last_update === true,
+        last_update: existingBlockOptions.last_update,
         show_title: $cfgModal
           .find('[data-block-option="show_title"]')
           .hasClass('active'),
@@ -4705,6 +5576,10 @@ var DashticzWidgetEditor = (function () {
         widgetConfigs.clock = collected;
       } else if (widgetId === 'garbage') {
         widgetConfigs.garbage = collected;
+      } else if (widgetId === 'postnl') {
+        widgetConfigs.postnl = collected;
+      } else if (widgetId === 'hpilo') {
+        widgetConfigs.hpilo = collected;
       } else if (widgetId === 'sonarr') {
         widgetConfigs.sonarr = collected;
       } else if (widgetId === 'spotify') {
@@ -4717,6 +5592,8 @@ var DashticzWidgetEditor = (function () {
           station: $.trim($('#we-cfg-pt-station').val() || '') || 'UT',
         };
       } else if (widgetId === 'trafficinfo') {
+        collected.showemptyroadsText =
+          (widgetConfigs.trafficinfo || {}).showemptyroadsText || '';
         widgetConfigs.trafficinfo = collected;
       } else if (widgetId === 'alarmmeldingen') {
         var rss = $.trim($('#we-cfg-alarm-rss').val() || '');
@@ -4955,11 +5832,7 @@ var DashticzWidgetEditor = (function () {
             .removeClass('text-danger')
             .text(_t('saving', 'Saving…'));
           $.when(applyResult)
-            .done(function () {
-              window.bootstrap.Modal.getInstance(
-                document.getElementById('we-config-popup')
-              ).hide();
-            })
+            .done(hideCfgModal)
             .fail(function (xhr) {
               var message =
                 xhr && xhr.responseJSON && xhr.responseJSON.error
@@ -4970,9 +5843,7 @@ var DashticzWidgetEditor = (function () {
             });
           return;
         }
-        window.bootstrap.Modal.getInstance(
-          document.getElementById('we-config-popup')
-        ).hide();
+        hideCfgModal();
       }
     });
 
@@ -5076,6 +5947,22 @@ var DashticzWidgetEditor = (function () {
         _openGraphFromWidgets();
         return;
       }
+      if ($(this).data('special-widget') === 'f1') {
+        _openF1FromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'tvgids') {
+        _openTvgidsFromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'fullykiosk') {
+        _openFullykioskFromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'weatherinfo') {
+        _openWeatherinfoFromWidgets();
+        return;
+      }
       _toggleWidget(String($(this).data('widget-id')));
     });
 
@@ -5117,6 +6004,22 @@ var DashticzWidgetEditor = (function () {
       }
       if ($(this).data('special-widget') === 'graph') {
         _openGraphFromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'f1') {
+        _openF1FromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'tvgids') {
+        _openTvgidsFromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'fullykiosk') {
+        _openFullykioskFromWidgets();
+        return;
+      }
+      if ($(this).data('special-widget') === 'weatherinfo') {
+        _openWeatherinfoFromWidgets();
         return;
       }
       _toggleWidget(String($(this).data('widget-id')));
@@ -5193,6 +6096,28 @@ var DashticzWidgetEditor = (function () {
         'garbage_use_cors_prefix',
       ],
       sonarr: ['sonarr_url', 'sonarr_apikey', 'sonarr_maxitems'],
+      postnl: [
+        'postnl_username',
+        'postnl_password',
+        'postnl_days',
+        'postnl_pollminutes',
+        'postnl_fontsize',
+        'postnl_showdelivered',
+        'postnl_iconstyle',
+        'postnl_date_color',
+        'postnl_time_color',
+        'postnl_text_color',
+      ],
+      hpilo: [
+        'hpilo_host',
+        'hpilo_port',
+        'hpilo_username',
+        'hpilo_password',
+        'hpilo_pollseconds',
+        'hpilo_fontsize',
+        'hpilo_rows',
+        'hpilo_icons',
+      ],
       spotify: ['spot_clientid'],
       calendar: ['calendarformat', 'calendarlanguage', 'calendar_maxitems'],
       secpanel: ['security_button_icons'],
@@ -5248,7 +6173,9 @@ var DashticzWidgetEditor = (function () {
       entry.icon = blockOptions.iconValue;
     }
     entry.hide_data = blockOptions.hide_data === true;
-    entry.last_update = blockOptions.last_update === true;
+    if (typeof blockOptions.last_update !== 'undefined') {
+      entry.last_update = blockOptions.last_update === true;
+    }
     if (blockOptions.show_title === false) entry.hide_title = true;
     entry.custom_fields = {};
     Object.keys(blockOptions.preservedFields || {}).forEach(function (field) {
@@ -5363,17 +6290,19 @@ var DashticzWidgetEditor = (function () {
       )
         ? 1
         : 0;
-      entry.radars = Number(
-        typeof trcfg.radars === 'undefined' ? 1 : trcfg.radars
-      )
-        ? 1
-        : 0;
       entry.results = parseInt(trcfg.results, 10) || 5;
       entry.maxDistance = parseFloat(trcfg.maxDistance) || 40;
       if (trcfg.latitude !== '' && typeof trcfg.latitude !== 'undefined')
         entry.latitude = parseFloat(trcfg.latitude);
       if (trcfg.longitude !== '' && typeof trcfg.longitude !== 'undefined')
         entry.longitude = parseFloat(trcfg.longitude);
+      entry.filter = trcfg.filter === 'roads' ? 'roads' : 'distance';
+      entry.road = String(trcfg.road || '').trim();
+      // A custom "no announcements" text from CONFIG.js is kept as long as
+      // the option stays switched on.
+      entry.showemptyroads = Number(trcfg.showemptyroads)
+        ? trcfg.showemptyroadsText || true
+        : false;
     }
     if (item.id === 'iframe') {
       var icfg = widgetConfigs.iframe || {};
@@ -5582,10 +6511,31 @@ var DashticzWidgetEditor = (function () {
   }
 
   function _closeModalWithoutSaving() {
-    var el = document.getElementById('widgeteditorpopup');
-    var instance =
-      el && window.bootstrap && window.bootstrap.Modal.getInstance(el);
-    if (instance) instance.hide();
+    _hideModal(document.getElementById('widgeteditorpopup'));
+  }
+
+  /* Close a popup after one of its own actions (OK, Save, Back, ...).
+     Bootstrap's Modal.hide() is silently ignored while a modal is still
+     opening (its fade-in), so an action handled right after a popup opened
+     did its work but left the popup open, and anything waiting for its
+     'hidden.bs.modal' (the parent editor, a child popup) never ran. Such a
+     modal is now hidden as soon as it has finished opening; at any other
+     moment this is exactly Modal.hide(). Bootstrap's own close paths
+     (Cancel/X, Escape, backdrop) are left unchanged. Kept per file, like
+     deviceeditor.js's copy, so no editor depends on another cached script. */
+  function _hideModal(element) {
+    var modal =
+      element &&
+      window.bootstrap &&
+      window.bootstrap.Modal.getInstance(element);
+    if (!modal) return;
+    if (modal._isShown === true && modal._isTransitioning === true) {
+      $(element).one('shown.bs.modal', function () {
+        modal.hide();
+      });
+      return;
+    }
+    modal.hide();
   }
 
   function _save() {
@@ -5694,7 +6644,7 @@ var DashticzWidgetEditor = (function () {
             });
             var gridItems = [];
             layoutOrder.forEach(function (item) {
-              if (item.widgetId) {
+              if (_isManagedLayoutItem(item)) {
                 if (!selectedWidgets[item.widgetId]) return;
                 includedWidgets[item.widgetId] = true;
                 gridItems.push({
@@ -5752,7 +6702,7 @@ var DashticzWidgetEditor = (function () {
           }
           var layoutItems = [];
           layoutOrder.forEach(function (item) {
-            if (item.widgetId) {
+            if (_isManagedLayoutItem(item)) {
               if (!selectedWidgets[item.widgetId]) return;
               includedWidgets[item.widgetId] = true;
               var widgetEntry = {

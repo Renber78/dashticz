@@ -547,7 +547,8 @@ function configwriter_extract_section_config_settings($config, $startMarker, $en
 
     $section = substr($config, $startPos, $endPos - $startPos);
     if (!preg_match_all(
-        "/config\\[(['\\\"])([A-Za-z0-9_]+)\\1\\]\\s*=\\s*([^;]+);/",
+        // The value may hold quoted strings, which can contain a ';'.
+        "/config\\[(['\\\"])([A-Za-z0-9_]+)\\1\\]\\s*=\\s*((?:\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^;\"'])+);/",
         $section,
         $matches,
         PREG_SET_ORDER
@@ -584,6 +585,14 @@ function configwriter_emit_config_settings($settings, $raw = false)
     return $out;
 }
 
+/** Cut $value to at most $bytes bytes without splitting a UTF-8 character. */
+function configwriter_cut_bytes($value, $bytes)
+{
+    return function_exists('mb_strcut')
+        ? mb_strcut((string)$value, 0, $bytes, 'UTF-8')
+        : substr((string)$value, 0, $bytes);
+}
+
 function configwriter_js_string_escape($value)
 {
     return str_replace(
@@ -613,19 +622,31 @@ function configwriter_format_props($props)
         if ($value === null) {
             continue;
         }
+        // Plain identifiers stay unquoted (the existing output); anything else
+        // becomes a quoted JSON string so a key can never end the object literal.
+        $key = preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/D', (string)$key)
+            ? (string)$key
+            : json_encode((string)$key, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if (is_bool($value)) {
             $parts[] = $key . ':' . ($value ? 'true' : 'false');
             continue;
+        }
+        if (is_float($value) && !is_finite($value)) {
+            continue; // INF and NAN are no JavaScript literals
         }
         if (is_int($value) || is_float($value)) {
             $parts[] = $key . ':' . $value;
             continue;
         }
         if (is_array($value) || is_object($value)) {
-            $parts[] = $key . ':' . json_encode(
+            $encoded = json_encode(
                 $value,
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
             );
+            if ($encoded === false) {
+                continue; // too deep or not encodable: leave the property out
+            }
+            $parts[] = $key . ':' . $encoded;
             continue;
         }
         $parts[] = $key . ":'" . configwriter_js_string_escape((string)$value) . "'";
@@ -655,7 +676,7 @@ function configwriter_restore_editor_value($value, $depth = 0)
 
 function configwriter_emit_block_line($key, $props)
 {
-    return "blocks['" . $key . "'] = " . configwriter_format_props($props) . ";\n";
+    return "blocks['" . configwriter_js_string_escape((string)$key) . "'] = " . configwriter_format_props($props) . ";\n";
 }
 
 function configwriter_emit_column_line($key, $blockKeys, $width)
@@ -1199,7 +1220,7 @@ function configwriter_build_layout_section($blockLines, $items, $screenNumber = 
         }
         $ref = $item['ref'];
         if (isset($blockLines[$ref]) && !isset($usedRefs[$ref])) {
-            $section .= "blocks['" . $ref . "'] = " . $blockLines[$ref] . "\n";
+            $section .= "blocks['" . configwriter_js_string_escape((string)$ref) . "'] = " . $blockLines[$ref] . "\n";
             $usedRefs[$ref] = true;
         }
     }
@@ -1259,7 +1280,7 @@ function configwriter_build_standby_layout_section($blockLines, $items, $width =
         $ref = $item['ref'];
         $blockKeys[] = $ref;
         if (isset($blockLines[$ref]) && !isset($usedRefs[$ref])) {
-            $section .= "blocks['" . $ref . "'] = " . $blockLines[$ref] . "\n";
+            $section .= "blocks['" . configwriter_js_string_escape((string)$ref) . "'] = " . $blockLines[$ref] . "\n";
             $usedRefs[$ref] = true;
         }
     }
@@ -1367,9 +1388,9 @@ function configwriter_build_grid_layout_section(
         );
         $inlineGrid = configwriter_format_props($position);
         if (isset($item['propsLiteral']) && is_string($item['propsLiteral'])) {
-            $section .= "blocks['" . $ref . "'] = "
+            $section .= "blocks['" . configwriter_js_string_escape((string)$ref) . "'] = "
                 . $item['propsLiteral'] . ";\n";
-            $section .= "blocks['" . $ref . "']['grid'] = "
+            $section .= "blocks['" . configwriter_js_string_escape((string)$ref) . "']['grid'] = "
                 . $inlineGrid . ";\n";
         } elseif (isset($item['props']) && is_array($item['props'])) {
             $props = $item['props'];
@@ -1538,7 +1559,13 @@ function configwriter_device_block_props($device, $defaultWidth = 3)
         $props['hide_data'] = !empty($device['hide_data']);
     }
     if (array_key_exists('last_update', $device)) {
-        $props['last_update'] = !empty($device['last_update']);
+        if ($device['last_update'] === null) {
+            // Not set on the block and not changed in the editor: keep
+            // following the global settings['last_update'].
+            unset($props['last_update']);
+        } else {
+            $props['last_update'] = !empty($device['last_update']);
+        }
     }
     if (array_key_exists('switch', $device)) {
         $props['switch'] = !empty($device['switch']);
@@ -1625,12 +1652,15 @@ function configwriter_special_block_props($block)
         }
     } elseif ($kind === 'custom') {
         // A Custom device's idx is usually a plain Domoticz device id, but it
-        // may also be a 'v<idx>' string referencing a Domoticz user variable
+        // may also be a 'v<idx>' string referencing a Domoticz user variable,
+        // an 's<idx>' group/scene or an '<idx>_<subidx>' sub-device reference
         // (js/saveblocks.php already validated the shape) - that string must
-        // survive unchanged, not be cast down to (int) 0.
-        $isVariableIdx = is_string($block['idx']) && preg_match('/^v\d+$/', $block['idx']);
+        // survive unchanged, not be cast down to (int) 0 or lose its
+        // sub-index (#1309).
+        $isStringIdx = is_string($block['idx'])
+            && preg_match('/^(?:v\d+|s[1-9]\d*|[1-9]\d*_[1-9]\d*)$/', $block['idx']);
         $props = [
-            'idx' => $isVariableIdx ? $block['idx'] : (int)$block['idx'],
+            'idx' => $isStringIdx ? $block['idx'] : (int)$block['idx'],
             'width' => $width,
         ];
         if (trim($title) !== '') {
@@ -1696,8 +1726,29 @@ function configwriter_special_block_props($block)
         // property is present and explicitly false.
         $props['last_update'] = !empty($block['last_update']);
         if (isset($block['idx']) && $block['idx'] !== null && $block['idx'] !== '') {
-            $props['idx'] = (int)$block['idx'];
+            // Keep a documented 's<idx>' group reference as written (a bare
+            // number is a device idx for Automation, see js/devicerules.js).
+            $props['idx'] = is_string($block['idx']) && preg_match('/^s[1-9]\d*$/', $block['idx'])
+                ? $block['idx']
+                : (int)$block['idx'];
         }
+    } elseif ($kind === 'cluster') {
+        // js/components/cluster.js dispatches purely on type: 'cluster',
+        // always written the same as group's own type: 'group' just above -
+        // unlike Group, always idx-less: devices (see saveblocks.php's
+        // 'cluster' branch for the non-empty-array requirement) is carried
+        // through custom_fields below like any other extra field.
+        $props = [
+            'width' => $width,
+            'type' => 'cluster',
+        ];
+        if (trim($title) !== '') {
+            $props['title'] = $title;
+        }
+        if (array_key_exists('icon', $block) && $block['icon'] !== null) {
+            $props['icon'] = (string)$block['icon'];
+        }
+        $props['last_update'] = !empty($block['last_update']);
     } elseif ($kind === 'html') {
         // js/components/html.js dispatches on a truthy htmlfile alone - no
         // `type` of its own. htmlfile itself is carried through custom_fields
@@ -1845,6 +1896,66 @@ function configwriter_special_block_props($block)
         // check, which only ever suppresses the global default when this
         // property is present and explicitly false.
         $props['last_update'] = !empty($block['last_update']);
+    } elseif ($kind === 'tvgids') {
+        // js/components/tvgids.js dispatches on a truthy tvgids (the channel
+        // list) alone - no `type` of its own, same convention as F1 below.
+        // tvgids and every other TVgids setting are carried through
+        // custom_fields (saveblocks.php validates the channel list).
+        $props = [
+            'width' => $width,
+        ];
+        if (trim($title) !== '') {
+            $props['title'] = $title;
+        }
+        if (array_key_exists('icon', $block) && $block['icon'] !== null) {
+            $props['icon'] = (string)$block['icon'];
+        }
+        $props['last_update'] = !empty($block['last_update']);
+    } elseif ($kind === 'fullykiosk') {
+        // js/components/fullykiosk.js dispatches on fullymode alone - no
+        // `type` of its own, same convention as F1 below. fullymode and every
+        // other Fully Kiosk setting are carried through custom_fields
+        // (saveblocks.php validates the mode, host, port and switch idx).
+        $props = [
+            'width' => $width,
+        ];
+        if (trim($title) !== '') {
+            $props['title'] = $title;
+        }
+        if (array_key_exists('icon', $block) && $block['icon'] !== null) {
+            $props['icon'] = (string)$block['icon'];
+        }
+        $props['last_update'] = !empty($block['last_update']);
+    } elseif ($kind === 'weatherinfo') {
+        // js/components/weatherinfo.js dispatches on wimode alone - no `type`
+        // of its own, same convention as F1 below. wimode and every other
+        // Weather Info setting are carried through custom_fields
+        // (saveblocks.php validates the mode and the location).
+        $props = [
+            'width' => $width,
+        ];
+        if (trim($title) !== '') {
+            $props['title'] = $title;
+        }
+        if (array_key_exists('icon', $block) && $block['icon'] !== null) {
+            $props['icon'] = (string)$block['icon'];
+        }
+        $props['last_update'] = !empty($block['last_update']);
+    } elseif ($kind === 'f1') {
+        // js/components/f1.js dispatches on a truthy f1mode alone - no
+        // `type` of its own, same convention as news/graph below. f1mode and
+        // every other F1 setting are carried through custom_fields
+        // (saveblocks.php validates the mode and the calendar URLs).
+        $props = [
+            'width' => $width,
+        ];
+        if (trim($title) !== '') {
+            $props['title'] = $title;
+        }
+        if (array_key_exists('icon', $block) && $block['icon'] !== null) {
+            $props['icon'] = (string)$block['icon'];
+        }
+        $props['last_update'] = !empty($block['last_update']);
     } elseif ($kind === 'news') {
         // js/components/news.js dispatches on a truthy feed alone - no
         // `type` of its own, same convention as html/iframe/calendar/
@@ -1961,6 +2072,12 @@ function configwriter_special_block_props($block)
             $props[$field] = $value;
         }
     }
+    // null = the block has no last_update of its own and the user did not
+    // change it: leave it out so the tile keeps following the global
+    // settings['last_update'] instead of turning into last_update:false.
+    if (array_key_exists('last_update', $block) && $block['last_update'] === null) {
+        unset($props['last_update']);
+    }
     return $props;
 }
 
@@ -1981,7 +2098,8 @@ function configwriter_special_block_props($block)
 function configwriter_extract_screen_block_owners($config, $excludeScreenNumber = null)
 {
     $owners = [];
-    $kinds = ['device', 'widget', 'grid-layout'];
+    // 'dashboard' and 'layout' hold the blocks a classic screen kept after its last save.
+    $kinds = ['device', 'widget', 'grid-layout', 'layout', 'dashboard'];
     $screenNumbers = array_merge([0], configwriter_extract_numbered_screens($config));
 
     foreach ($screenNumbers as $screenNumber) {

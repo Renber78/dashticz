@@ -1,5 +1,5 @@
 /* eslint-disable no-prototype-builtins */
-/* global getAllDevicesHandler objectlength config initVersion loadSettings settings getLocationParameters _DASHTICZ_VERSION*/
+/* global getAllDevicesHandler objectlength config initVersion loadSettings settings getLocationParameters _DASHTICZ_VERSION _LOADER_CACHE_BUST*/
 /* global sessionValid MobileDetect moment getBlock DT_function*/
 /* global Swiper Debug*/
 
@@ -76,21 +76,30 @@ function createErrorHandler() {
 }
 
 function loadStyling() {
-  $(
-    '<link href="' +
-      'css/creative.css?_=' +
-      _DASHTICZ_VERSION +
-      '" rel="stylesheet">'
-  ).appendTo('head');
-  // Loaded after creative.css so the config/editor typography rules in it
-  // win the cascade for any selector that shares the same specificity,
-  // without needing to touch creative.css itself.
-  $(
-    '<link href="' +
-      'css/config-typography.css?_=' +
-      _DASHTICZ_VERSION +
-      '" rel="stylesheet">'
-  ).appendTo('head');
+  // index.html normally adds these stylesheets itself so that they download in
+  // parallel with dist/bundle.js. This is the fallback for a customised
+  // index.html that does not.
+  if ($('link[data-dashticz-styling]').length) return;
+  // Bust on js/loader.js's per-page-load timestamp, like the scripts: the
+  // static _DASHTICZ_VERSION only changes on a bundle rebuild, so a browser
+  // kept serving a stale cached creative.css/config-typography.css after
+  // every CSS change in between.
+  var cssCacheBust =
+    typeof _LOADER_CACHE_BUST !== 'undefined'
+      ? _LOADER_CACHE_BUST
+      : _DASHTICZ_VERSION;
+  // config-typography.css is loaded after creative.css so the config/editor
+  // typography rules in it win the cascade for any selector that shares the
+  // same specificity, without needing to touch creative.css itself.
+  ['css/creative.css', 'css/config-typography.css'].forEach(function (href) {
+    $(
+      '<link href="' +
+        href +
+        '?_=' +
+        cssCacheBust +
+        '" rel="stylesheet" data-dashticz-styling>'
+    ).appendTo('head');
+  });
 }
 
 function loadLogRocket() {
@@ -688,6 +697,9 @@ function prepareStart() {
     .then(getSettings)
     .then(function () {
       return loadScript('js/dt_function.js');
+    })
+    .then(function () {
+      return DT_function.loadWidgetManifest();
     })
     .then(addDebug)
     .then(loadCustomJS)

@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Dashticz 4.0.6 - a customizable dashboard for Domoticz"
+      content="Dashticz 4.20.2 - a customizable dashboard for Domoticz"
     />
     <meta name="author" content="Dashticz" />
     <meta name="theme-color" content="#090b12" />
@@ -39,8 +39,29 @@
       as="image"
       type="image/png"
     />
-    <link rel="stylesheet" type="text/css" href="./dist/bundle.css?v=189" />
-    <link rel="stylesheet" type="text/css" href="./css/garbageconfig.css?t=1" />
+    <link rel="stylesheet" type="text/css" href="./dist/bundle.css?v=210" />
+    <!-- creative.css and config-typography.css used to be added by
+         js/main.js, which only ran after dist/bundle.js was downloaded and
+         executed. Starting them here lets the browser fetch them in parallel
+         with the bundle. They keep the per-page-load cache bust of js/loader.js
+         (which reuses this timestamp). plugins.css and helpers.css are pulled
+         in by creative.css through @import, so they are preloaded too. -->
+    <link rel="preload" href="css/plugins.css" as="style" />
+    <link rel="preload" href="css/helpers.css" as="style" />
+    <script>
+      (function () {
+        window._LOADER_CACHE_BUST = new Date().getTime();
+        ['css/creative.css', 'css/config-typography.css'].forEach(
+          function (href) {
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href + '?_=' + window._LOADER_CACHE_BUST;
+            link.setAttribute('data-dashticz-styling', '');
+            document.head.appendChild(link);
+          }
+        );
+      })();
+    </script>
     <title>Dashticz</title>
   </head>
 
@@ -73,7 +94,15 @@
             ><i></i><i></i><i></i
           ></span>
         </div>
-        <div class="loaderVersion">Version 4.0.6</div>
+        <div class="loaderDetail"></div>
+        <button
+          type="button"
+          class="loaderRetry"
+          onclick="window.location.reload()"
+        >
+          Retry
+        </button>
+        <div class="loaderVersion">Version 4.20.2</div>
       </div>
     </div>
     <div id="hide" style="display: none">
@@ -87,8 +116,24 @@
       <div class="swiper-pagination"></div>
     </div>
 
-    <script src="js/loader.js?t=159"></script>
-    <script src="js/lmsconfig.js?t=1"></script>
-    <script src="js/garbageconfig.js?t=7"></script>
+    <script src="js/loader.js?t=160"></script>
+    <script>
+      // Config-popup helpers, cache-busted per page load like js/loader.js
+      // does for the other scripts: a fixed ?t= number kept serving a stale
+      // cached copy after every change until someone remembered to bump it.
+      (function () {
+        var bust = Date.now();
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'css/garbageconfig.css?t=' + bust;
+        document.head.appendChild(link);
+        ['js/lmsconfig.js', 'js/garbageconfig.js'].forEach(function (src) {
+          var script = document.createElement('script');
+          script.src = src + '?t=' + bust;
+          script.async = false;
+          document.body.appendChild(script);
+        });
+      })();
+    </script>
   </body>
 </html>

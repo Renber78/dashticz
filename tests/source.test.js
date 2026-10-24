@@ -7,6 +7,19 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 
+// The kinds that are found by their reference in the Layout Editor come from
+// js/widgets.json (flag referenceBased).
+function assertReferenceBasedKind(layoutEditor, kind) {
+  assert.match(
+    layoutEditor,
+    /var REFERENCE_BASED_SPECIAL_KINDS = DT_function\.widgetKinds\('referenceBased'\);/
+  );
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(root, 'js/widgets.json'), 'utf8')
+  );
+  assert.equal(manifest.kinds[kind].referenceBased, true);
+}
+
 // These tests verify source tokens and ordering, not a particular formatter's
 // line wrapping. Make their regular expressions insensitive to whitespace so
 // a clean Prettier pass cannot invalidate otherwise unchanged behavior. Text
@@ -1243,17 +1256,11 @@ test('device and widget config editors share full widget config and preserve hid
     widgetEditor,
     /hide_data: \$hideDataButton\.length\s*\n\s*\? !\$hideDataButton\.hasClass\('active'\)\s*\n\s*: existingBlockOptions\.hide_data === true,/
   );
+  assert.match(widgetEditor, /last_update: existingBlockOptions\.last_update,/);
+  assert.match(widgetEditor, /options\.hide_data = !!definition\.hide_data/);
   assert.match(
     widgetEditor,
-    /last_update: existingBlockOptions\.last_update === true/
-  );
-  assert.match(
-    widgetEditor,
-    /options\.hide_data = definition\.hide_data === true/
-  );
-  assert.match(
-    widgetEditor,
-    /options\.last_update = definition\.last_update === true/
+    /options\.last_update =\s*typeof definition\.last_update === 'undefined'/
   );
   assert.match(
     widgetEditor,
@@ -1261,11 +1268,11 @@ test('device and widget config editors share full widget config and preserve hid
   );
   assert.match(
     widgetEditor,
-    /entry\.last_update = blockOptions\.last_update === true/
+    /if \(typeof blockOptions\.last_update !== 'undefined'\) \{\s*entry\.last_update = blockOptions\.last_update === true/
   );
   assert.match(saveWidgets, /'icon', 'hide_data', 'last_update', 'hide_title'/);
   assert.match(saveWidgets, /if \(!empty\(\$widget\['hide_data'\]\)\)/);
-  assert.match(saveWidgets, /if \(!empty\(\$widget\['last_update'\]\)\)/);
+  assert.match(saveWidgets, /if \(isset\(\$widget\['last_update'\]\)\)/);
   // Icon/Data/Updated/Title/Background render as a plain flex-wrap row of
   // icon buttons now (#195), not a switch grid - .de-config-options and its
   // -three/-four/-five column-count modifiers are gone from both the source
@@ -1303,7 +1310,7 @@ test('device and widget config editors share full widget config and preserve hid
   );
   assert.match(
     deviceEditor,
-    /\(!definition\.type \|\| definition\.type === 'dial' \|\| definition\.type === 'bar' \|\|\s*\n\s*definition\.type === reference\) &&\s*\n\s*\(parseInt\(definition\.idx, 10\) > 0 \|\| _isCustomVariableIdx\(definition\.idx\)\)/
+    /\(!definition\.type \|\| definition\.type === 'dial' \|\| definition\.type === 'bar' \|\|\s*\n\s*definition\.type === reference\) &&\s*\n\s*\(parseInt\(definition\.idx, 10\) > 0 \|\|\s*_isCustomVariableIdx\(definition\.idx\) \|\|[\s\S]{0,300}?\(_isSceneIdx\(definition\.idx\) && !_isSceneIdx\(reference\)\)\)/
   );
   assert.match(saveBlocks, /function _dashticz_editor_block_type\(\$entry\)/);
   assert.match(saveBlocks, /'type' => _dashticz_editor_block_type\(\$entry\)/);
@@ -1433,9 +1440,16 @@ test('device and widget config editors share full widget config and preserve hid
     dashticz,
     /special\.name === 'blocktitle' && cfg\.image[\s\S]*cfg\.icon = '';/
   );
+  // A separator without an icon property is read with its Icon option off,
+  // matching how it renders (#169 below), so an unrelated save does not add
+  // SEPARATOR_DEFAULT_ICON to it.
   assert.match(
     deviceEditor,
-    /kind === 'title' && typeof definition\.icon === 'undefined'[\s\S]*\? SEPARATOR_DEFAULT_ICON/
+    /\(kind === 'title' \|\| kind === 'slidebutton'\s*\n\s*\? typeof definition\.icon === 'string' && definition\.icon !== ''/
+  );
+  assert.doesNotMatch(
+    deviceEditor,
+    /kind === 'title' && typeof definition\.icon === 'undefined'[\s\S]{0,40}\? SEPARATOR_DEFAULT_ICON/
   );
   // #169: a hand-written/legacy blocktitle entry with no `icon` property at
   // all must render with no icon, exactly like Wizard's explicit icon: ''
@@ -1839,7 +1853,7 @@ test('widget editor exposes the supported catalog and keeps legacy options out o
   assert.match(widgetEditor, /Hayman clock/);
   assert.match(widgetEditor, /Miniclock/);
   assert.match(widgetEditor, /id="we-cfg-calendar-list"/);
-  assert.match(widgetEditor, /id="we-calendar-add"/);
+  assert.match(widgetEditor, /_addButtonHtml\(\s*'we-calendar-add'/);
   assert.match(widgetEditor, /class="we-calendar-row/);
   assert.match(widgetEditor, /we-cfg-clock-type/);
   assert.doesNotMatch(widgetEditor, /_cfgField\('hide_seconds',/);
@@ -1895,7 +1909,7 @@ test('widget editor exposes the supported catalog and keeps legacy options out o
     /map: \['gm_api', 'gm_zoomlevel', 'gm_latitude', 'gm_longitude'\]/
   );
   assert.match(widgetEditor, /moon: \['idx_moonpicture'\]/);
-  assert.match(widgetEditor, /id="we-camera-add"/);
+  assert.match(widgetEditor, /_addButtonHtml\(\s*'we-camera-add'/);
   assert.match(widgetEditor, /class="we-camera-row/);
   assert.match(widgetEditor, /weather:\s*\{[\s\S]*provider:/);
   assert.match(widgetEditor, /clock:\s*\{[\s\S]*clockType:\s*'basicclock'/);
@@ -2717,7 +2731,21 @@ test('modern dark theme is portable and documented', () => {
     theme,
     /\.transbg select:focus,[\s\S]*border-color: var\(--border-color-selector\) !important/
   );
-  assert.doesNotMatch(theme, /linear-gradient/);
+  // One deliberate exception to this theme's otherwise gradient-free
+  // convention: the blinds/dimmer slider's track fill, matching
+  // creative.css's own gradient default for the same element. --main-bg
+  // was briefly a gradient here too (per an earlier user request) but was
+  // reverted back to a flat color for this theme specifically - Liquid
+  // Glass Blue/Grey keep the gradient --main-bg instead (see their own
+  // portability tests). Assert there's still only this one gradient in
+  // Modern Dark, so any future one creeping in elsewhere still fails this
+  // test.
+  assert.match(
+    theme,
+    /\.blinds-slider-wrap \.slider \.ui-slider-range \{\s*\n\s*background: linear-gradient\(/
+  );
+  assert.match(theme, /--main-bg: rgba\(32, 33, 42, 0\.88\);/);
+  assert.strictEqual((theme.match(/linear-gradient/g) || []).length, 1);
   assert.match(theme, /\.mh \.btn\.active/);
   assert.match(
     theme,
@@ -3544,7 +3572,7 @@ test('Domoticz log, OWM, Sunrise/Sunset and Timegraph are added to the Widget Co
   // Multiple values, each optionally from its own device, must remain
   // supported (not just a single 'values: [\"Temp\"]' array) — the dynamic
   // value-row repeater with no artificial row limit.
-  assert.match(widgetEditor, /we-timegraph-value-add/);
+  assert.match(widgetEditor, /we-timegraph-add/);
   assert.match(widgetEditor, /we-timegraph-value-remove/);
   assert.match(widgetEditor, /_timegraphValueRowHtml/);
 
@@ -3956,6 +3984,142 @@ test('Dial sizing falls back sanely instead of silently rendering oversized', ()
   );
 });
 
+// Sphinx derives section ids from heading text and explicit labels with
+// docutils' make_id(): ASCII, lower case, runs of other characters -> '-'.
+function docsSectionId(text) {
+  return text
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^[-0-9]+|-+$/g, '');
+}
+
+function docsAnchorIds(rst) {
+  const ids = new Set();
+  const lines = rst.split(/\r?\n/);
+  const adornment = /^([!-/:-@[-`{-~])\1{2,}\s*$/;
+  lines.forEach((line, index) => {
+    const label = line.match(/^\.\.\s+_([^:]+?)\s*:\s*$/);
+    if (label) ids.add(docsSectionId(label[1]));
+    if (
+      line.trim() &&
+      !/^\s/.test(line) &&
+      !adornment.test(line) &&
+      adornment.test(lines[index + 1] || '')
+    )
+      ids.add(docsSectionId(line.trim()));
+  });
+  return ids;
+}
+
+test('in-app documentation links point at existing docs pages and anchors', () => {
+  const sources = filesBelow(path.join(root, 'js'), '.js');
+  const links = [];
+  for (const file of sources) {
+    const source = fs.readFileSync(file, 'utf8');
+    const relative = path.relative(root, file);
+    for (const call of source.matchAll(
+      /DT_function\.docsUrl\(\s*'([^']*)'\s*\)/g
+    ))
+      links.push({ file: relative, page: call[1] });
+    // Deep links go through DT_function.docsUrl() so the docs version is
+    // set in one place.
+    if (relative !== path.join('js', 'dt_function.js'))
+      assert.ok(
+        !/dashticz\.readthedocs\.io\/en\//.test(source),
+        relative + ' hardcodes a versioned docs URL'
+      );
+  }
+  for (const file of filesBelow(path.join(root, 'tpl'), '.tpl'))
+    assert.ok(
+      !/dashticz\.readthedocs\.io\/en\//.test(fs.readFileSync(file, 'utf8')),
+      path.relative(root, file) + ' hardcodes a versioned docs URL'
+    );
+
+  const pages = links.map((link) => link.page).sort();
+  for (const expected of [
+    'blocks/specials/calendar.html#usage',
+    'blocks/specials/dial.html',
+    'blocks/specials/googlemaps.html#getting-a-google-maps-api-key',
+    'blocks/specials/publictransport.html',
+  ])
+    assert.ok(pages.includes(expected), 'missing docs link ' + expected);
+
+  for (const link of links) {
+    const [page, anchor] = link.page.split('#');
+    const where = link.file + ': ' + link.page;
+    assert.ok(page.endsWith('.html'), where + ' is not an .html page');
+    const rstPath = path.join(root, 'docs', page.replace(/\.html$/, '.rst'));
+    assert.ok(fs.existsSync(rstPath), where + ' has no docs page');
+    if (anchor !== undefined)
+      assert.ok(
+        docsAnchorIds(fs.readFileSync(rstPath, 'utf8')).has(anchor),
+        where + ' has no matching heading or label'
+      );
+  }
+
+  const dtFunction = fs.readFileSync(
+    path.join(root, 'js/dt_function.js'),
+    'utf8'
+  );
+  assert.match(
+    dtFunction,
+    /var DOCS_BASE_URL = 'https:\/\/dashticz\.readthedocs\.io\/en\/master\/';/
+  );
+  assert.match(dtFunction, /docsUrl: docsUrl,/);
+});
+
+test('calendar event popup links the calendar docs, encodes the location and closes cleanly', () => {
+  const calendar = fs.readFileSync(
+    path.join(root, 'js/components/calendar.js'),
+    'utf8'
+  );
+  const modal = fs.readFileSync(
+    path.join(root, 'tpl/calendar_2_modal.tpl'),
+    'utf8'
+  );
+  const showInfo = calendar.slice(
+    calendar.indexOf('function showInfo(pop) {'),
+    calendar.indexOf('function createCalObject(')
+  );
+  assert.ok(showInfo.length > 0);
+
+  // No calendar link: a translated hint that opens the calendar block docs.
+  assert.match(showInfo, /: language\.misc\.calendar_url_missing,/);
+  assert.match(
+    showInfo,
+    /: DT_function\.docsUrl\('blocks\/specials\/calendar\.html#usage'\),/
+  );
+  assert.doesNotMatch(showInfo, /config\.js/);
+  for (const locale of ['en_US', 'nl_NL', 'fr_FR']) {
+    const strings = JSON.parse(
+      fs.readFileSync(path.join(root, 'lang', locale + '.json'), 'utf8')
+    );
+    assert.equal(typeof strings.misc.calendar_url_missing, 'string', locale);
+  }
+
+  // '#', '?' and '/' in a location must stay part of the Maps query.
+  assert.match(
+    showInfo,
+    /locurl: 'https:\/\/www\.google\.com\/maps\/search\/' \+ encodeURIComponent\(loc\),/
+  );
+  // The location link is only rendered when there is a location.
+  assert.doesNotMatch(showInfo, /lochide/);
+  assert.match(
+    modal,
+    /\{\{#if loc\}\}<a class="pull-right" href="\{\{locurl\}\}"[^>]*>\{\{loc\}\}<\/a>\{\{\/if\}\}/
+  );
+
+  // The close handler lives on the popup, so it is removed with it instead of
+  // adding one more document.body handler per opened event.
+  assert.match(
+    showInfo,
+    /\$\('\.cal-modal'\)\.on\('click', '\.cal-close', function \(\) \{/
+  );
+  assert.doesNotMatch(showInfo, /\$\(document\.body\)\.on\(/);
+});
+
 test('Dial visual mode shows an inline hint pointing to the dial docs and Custom fields', () => {
   // Selecting Dial only sets type:'dial'; every other dial parameter (color,
   // min/max, subtype, values, ...) still has to be added by hand via Custom
@@ -3970,7 +4134,7 @@ test('Dial visual mode shows an inline hint pointing to the dial docs and Custom
   assert.match(deviceEditor, /class="alert alert-info de-dial-hint d-none"/);
   assert.match(
     deviceEditor,
-    /href="https:\/\/dashticz\.readthedocs\.io\/en\/beta\/blocks\/specials\/dial\.html"/
+    /'<a href="' \+ DT_function\.docsUrl\('blocks\/specials\/dial\.html'\) \+/
   );
   assert.match(deviceEditor, /function refreshDialHint\(\) \{/);
   assert.match(
@@ -4506,7 +4670,7 @@ test("Move mode Settings button opens the Multi/Custom Device's own config, not 
   // the Dial/Bar visual mode's type:'dial' (#182).
   assert.match(
     deviceEditor,
-    /\(!definition\.type \|\| definition\.type === 'dial' \|\| definition\.type === 'bar' \|\|\s*\n\s*definition\.type === reference\) &&\s*\n\s*\(parseInt\(definition\.idx, 10\) > 0 \|\| _isCustomVariableIdx\(definition\.idx\)\)/
+    /\(!definition\.type \|\| definition\.type === 'dial' \|\| definition\.type === 'bar' \|\|\s*\n\s*definition\.type === reference\) &&\s*\n\s*\(parseInt\(definition\.idx, 10\) > 0 \|\|\s*_isCustomVariableIdx\(definition\.idx\) \|\|[\s\S]{0,300}?\(_isSceneIdx\(definition\.idx\) && !_isSceneIdx\(reference\)\)\)/
   );
 });
 
@@ -4671,7 +4835,7 @@ test("Device Config popup lets a Custom/Multi device's main idx be corrected aft
   );
   assert.match(
     deviceEditor,
-    /var pendingIdx =[\s\S]{0,100}?isCustom \|\| isGroupBlock[\s\S]{0,120}?special\.idx[\s\S]{0,80}?: null;[\s\S]{0,100}?if \(isCustom\) \{[\s\S]{0,120}?var rawIdx = \$\.trim\(String\(\$\('#de-config-idx'\)\.val\(\) \|\| ''\)\);[\s\S]{0,60}?if \(_isCustomVariableIdx\(rawIdx\)\) \{[\s\S]{0,80}?pendingIdx = _normalizeCustomVariableIdx\(rawIdx\);[\s\S]{0,40}?\} else \{[\s\S]{0,100}?var parsedIdx = parseInt\(rawIdx, 10\);[\s\S]{0,160}?valid = false;/
+    /var pendingIdx =[\s\S]{0,100}?isCustom \|\| isGroupBlock[\s\S]{0,120}?special\.idx[\s\S]{0,80}?: null;[\s\S]{0,100}?if \(isCustom\) \{[\s\S]{0,120}?var rawIdx = \$\.trim\(String\(\$\('#de-config-idx'\)\.val\(\) \|\| ''\)\);[\s\S]{0,60}?if \(_isCustomVariableIdx\(rawIdx\)\) \{[\s\S]{0,80}?pendingIdx = _normalizeCustomVariableIdx\(rawIdx\);[\s\S]{0,40}?\} else if \(_isCustomSubdeviceIdx\(rawIdx\)\) \{[\s\S]{0,40}?pendingIdx = rawIdx;[\s\S]{0,40}?\} else if \(_isSceneIdx\(rawIdx\)\) \{[\s\S]{0,40}?pendingIdx = _normalizeSceneIdx\(rawIdx\);[\s\S]{0,40}?\} else \{[\s\S]{0,100}?var parsedIdx = parseInt\(rawIdx, 10\);[\s\S]{0,160}?valid = false;/
   );
   assert.match(
     deviceEditor,
@@ -4971,7 +5135,10 @@ test('Lyrion Music Server (LMS) block is registered, dispatched and wired throug
   // component left out of that list is dead code: Dashticz.register() for
   // it never runs, so components['lms'] never exists and every LMS block
   // silently falls through to the default/button dispatch instead.
-  assert.match(dashticz, /'group',\s*\n\s*'waqi',\s*\n\s*'lms',\s*\n\s*\];/);
+  assert.match(
+    dashticz,
+    /'group',\s*\n\s*'cluster',\s*\n\s*'waqi',\s*\n\s*'lms',\s*\n\s*\];/
+  );
 
   // The component itself: dispatches on type: 'lms' (like js/components/group.js
   // dispatches on type: 'group'), never sends an LMS control command, and
@@ -5133,10 +5300,7 @@ test('Lyrion Music Server (LMS) block is registered, dispatched and wired throug
   // added to that one array to get both the cog control and correct
   // config routing - see also 'Group block gets the Layout Editor
   // config...' below, which checks the same array for 'group'.
-  assert.match(
-    layoutEditor,
-    /var REFERENCE_BASED_SPECIAL_KINDS = \[[\s\S]{0,400}?'lms'[\s\S]{0,400}?\];/
-  );
+  assertReferenceBasedKind(layoutEditor, 'lms');
   assert.match(
     layoutEditor,
     /isConfigurable =[\s\S]{0,300}?REFERENCE_BASED_SPECIAL_KINDS\.indexOf\(item\.kind\) > -1/
@@ -5399,14 +5563,17 @@ test('Lyrion Music Server Title/Artist/Station text style (size/color) is config
     deviceEditor,
     /id="' \+\s*\n?\s*prefix \+ '-lms-' \+ line\.key \+ '-color"/
   );
+  // An empty size or an untouched colour is read as undefined, so the
+  // form defaults are not pinned into CONFIG.js (DE-203).
   assert.match(
     deviceEditor,
-    /titleSize:[\s\S]{0,20}parseInt\(\$popup\.find\('#' \+ prefix \+ '-lms-title-size'\)\.val\(\), 10\)[\s\S]{0,10}\|\|[\s\S]{0,10}16,/
+    /titleSize: _readLmsSize\(\$popup, prefix \+ '-lms-title-size'\),/
   );
   assert.match(
     deviceEditor,
-    /titleColor: String\([\s\S]{0,80}\$popup\.find\('#' \+ prefix \+ '-lms-title-color'\)\.val\(\) \|\| '#ffffff'[\s\S]{0,10}\),/
+    /titleColor: _readLmsColor\(\$popup, prefix \+ '-lms-title-color'\),/
   );
+  assert.match(deviceEditor, /defaultColor: '#ffffff'/);
   // Both save paths (the quick-add popup's managedSpecials[orderKey] entry,
   // and the edit popup's special.lmsXxx = pendingLms.xxx assignment) carry
   // the 6 new fields through to the specialEntry the rest of _save() posts.
@@ -5476,6 +5643,46 @@ test('LMS text style fields are protected from the generic Custom fields grid, s
   assert.match(
     deviceEditor,
     /hide_when_off: true,[\s\S]{0,700}title_size: true,[\s\S]{0,20}title_color: true,[\s\S]{0,20}artist_size: true,[\s\S]{0,20}artist_color: true,[\s\S]{0,20}station_size: true,[\s\S]{0,20}station_color: true,/
+  );
+});
+
+test('Device/Widget Config: picking an icon that matches the suggested default actually saves it', () => {
+  // Regression: a special block with no icon/image yet (e.g. a freshly
+  // added Cluster) gets a pre-filled Icon field showing a per-kind
+  // suggestion (_effectiveDeviceConfigIcon(), e.g. 'fas fa-list-check' for
+  // Cluster) that is NOT actually shown on the tile - defaultCfg never
+  // injects a runtime default icon for these kinds (#169 precedent). The
+  // save handler's own generatedIcon check silently skipped persisting that
+  // suggestion whenever the saved text still equalled it, so enabling Icon
+  // and leaving (or retyping) that exact suggested value - a deliberate
+  // choice - saved nothing at all, while picking Image instead always
+  // worked. iconFieldTouched (set from genuine interaction with the icon
+  // controls: the Icon/Image toggle, the source dropdown, typing the
+  // setting, or picking a custom image) must bypass that skip.
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  assert.match(deviceEditor, /var iconFieldTouched = false;/);
+  assert.match(
+    deviceEditor,
+    /if \(String\(\$\(this\)\.attr\('data-option'\)\) === 'icon'\) \{\s*\n\s*iconFieldTouched = true;/
+  );
+  assert.match(
+    deviceEditor,
+    /\$popup\.on\('change', '\.de-icon-source', function \(\) \{\s*\n\s*iconFieldTouched = true;/
+  );
+  assert.match(
+    deviceEditor,
+    /'input change',\s*\n\s*'\.de-icon-field-row \.de-custom-field-setting',\s*\n\s*function \(\) \{\s*\n\s*iconFieldTouched = true;/
+  );
+  assert.match(
+    deviceEditor,
+    /\$popup\.on\('click', '\.dt-custom-image-option', function \(\) \{\s*\n\s*iconFieldTouched = true;/
+  );
+  assert.match(
+    deviceEditor,
+    /generatedIcon &&\s*\n\s*rawSetting === initialIcon &&\s*\n\s*!options\.iconValue &&\s*\n\s*!iconFieldTouched\s*\n\s*\)\s*\n\s*return;/
   );
 });
 
@@ -5646,9 +5853,543 @@ test('Group block gets the Layout Editor config (cog) control, like HTML/LMS blo
   // shared REFERENCE_BASED_SPECIAL_KINDS array (see the LMS test above,
   // which checks the array declaration and both call sites) - here it
   // only needs to be re-checked for 'group' itself.
+  assertReferenceBasedKind(layoutEditor, 'group');
+});
+
+test('Cluster block gets its own Layout Editor config (cog) control and renders individually-switchable rows', () => {
+  const layoutEditor = fs.readFileSync(
+    path.join(root, 'js/layouteditor.js'),
+    'utf8'
+  );
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const dashticz = fs.readFileSync(path.join(root, 'js/dashticz.js'), 'utf8');
+  const switches = fs.readFileSync(path.join(root, 'js/switches.js'), 'utf8');
+
+  // Loaded (and therefore registered) at startup, same as every other
+  // component in js/dashticz.js's own `specials` list.
+  assert.match(dashticz, /'cluster',/);
+
+  // _resolveBlock() dispatches on type: 'cluster', same shape as Group's
+  // own type: 'group' check - without this a cluster block fell through
+  // to the untyped 'grid' fallback kind, which only gets a drag handle,
+  // never the cog.
   assert.match(
     layoutEditor,
-    /var REFERENCE_BASED_SPECIAL_KINDS = \[[\s\S]{0,400}?'group'[\s\S]{0,50}?\];/
+    /String\(definition\.type \|\| ''\)\.toLowerCase\(\) === 'cluster'/
+  );
+  assert.match(layoutEditor, /kind: 'cluster',/);
+  assertReferenceBasedKind(layoutEditor, 'cluster');
+
+  // js/deviceeditor.js's own _specialFromReference() recognizes the same
+  // type: 'cluster' shape, and the quick-add popup exists.
+  assert.match(
+    deviceEditor,
+    /String\(definition\.type \|\| ''\)\.toLowerCase\(\) === 'cluster'/
+  );
+  assert.match(deviceEditor, /function _showClusterPopup\(/);
+  assert.match(deviceEditor, /function openCluster\(\)/);
+  assert.match(deviceEditor, /openCluster: openCluster,/);
+
+  // The component itself: one row per device, each with its own toggle,
+  // not one combined status like Group.
+  assert.match(cluster, /name: 'cluster',/);
+  assert.match(cluster, /cluster-row/);
+  assert.match(cluster, /switchDevice\(/);
+
+  // switchDevice() must treat a cluster row's own computed newState the
+  // same way it already treats Group's - passed straight through, not
+  // re-derived from .icon/.fa-toggle-on DOM classes a cluster row's own
+  // markup never carries.
+  assert.match(
+    switches,
+    /block\.type === 'group' \|\| block\.type === 'cluster'/
+  );
+});
+
+test('a saved Cluster block can actually be re-opened and saved from the Layout Editor cog', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // _showConfigPopup() (reached via openLayoutConfig(), i.e. the Layout
+  // Editor's own cog) must strip the 'devices' row out of the generic
+  // custom-fields list for a Cluster block, exactly like it already does
+  // for Graph. Without this, the raw 'devices' row stayed rendered AND
+  // reserved (customKeys.devices = true below), so every save - even with
+  // zero changes - failed immediately with "duplicate field", making a
+  // saved Cluster block impossible to edit.
+  assert.match(
+    deviceEditor,
+    /if \(isClusterBlock\) \{[\s\S]{0,2800}?customRows = customRows\.filter\(function \(row\) \{[\s\S]{0,120}?return\s*\(\s*field !== 'devices' &&\s*field !== 'usage' &&\s*field !== 'mode' &&\s*field !== 'titles' &&\s*field !== 'switchscale' &&\s*field !== 'fontsize' &&\s*field !== 'icons'\s*\);[\s\S]{0,40}?\}\);[\s\S]{0,20}?\}/
+  );
+
+  // A dedicated add/remove device picker (mirroring _showClusterPopup's own)
+  // replaces that raw field, and is actually wired into the popup markup
+  // and the Save handler's persisted output.
+  assert.match(deviceEditor, /function _clusterFieldsHtml\(/);
+  assert.match(deviceEditor, /_clusterFieldsHtml\(\s*'de-config',/);
+  assert.match(
+    deviceEditor,
+    /isClusterBlock && !clusterPendingDevices\.length/
+  );
+  assert.match(
+    deviceEditor,
+    /if \(isClusterBlock\) \{\s*\n\s*var clusterDeviceIdxOut = clusterPendingDevices\.map/
+  );
+
+  // The row title must be allowed to shrink inside its flex row (a flex
+  // item's default min-width:auto ignores overflow:hidden/text-overflow,
+  // so a long device name pushed the whole block width instead of eliding -
+  // forcing an unwanted horizontal scrollbar on the tile).
+  assert.match(
+    css,
+    /\.cluster-row-title \{[\s\S]{0,60}?min-width: 0;[\s\S]{0,120}?text-overflow: ellipsis;/
+  );
+
+  // The 'mh' container class carries div.mh:not(.multiline) { height: 85px }
+  // (a single-line device-tile height), which clipped/collapsed a Cluster
+  // block down to almost nothing once it held more than one or two rows.
+  // Cluster's row count is inherently variable, so it must not opt into
+  // that fixed single-line height the way Group (always exactly one row)
+  // legitimately does.
+  assert.doesNotMatch(cluster, /containerClass:\s*'mh'/);
+});
+
+test('Cluster keeps its framework-painted icon/title and sizes rows like a device title', () => {
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // js/dashticz.js's renderBlock() already paints .dt_block's own
+  // .col-icon/.dt_title (from the block's configured icon/title) before
+  // run()/refresh() ever runs. doRefresh() must write into .dt_state - the
+  // framework's own content slot, same as e.g. OWM/Weather - rather than
+  // replacing .dt_block wholesale, which wiped that icon/title out on every
+  // refresh (leaving a Cluster block's own configured icon never visible).
+  assert.doesNotMatch(cluster, /find\('\.dt_block'\)\.html\(/);
+  assert.match(cluster, /find\('\.dt_state'\)\.html\(/);
+  // No longer hand-rolls its own .dt_title - the framework's renderTitle()
+  // (gated on the same hide_title the Title checkbox writes) already
+  // renders one.
+  assert.doesNotMatch(cluster, /class="dt_title"/);
+
+  // Row names read like a normal device title elsewhere in the dashboard
+  // (--font-device-title), just not bold, per user request.
+  assert.match(
+    css,
+    /\.cluster-row-title \{[\s\S]{0,300}?font-size: var\(--font-device-title\);[\s\S]{0,60}?font-weight: normal;/
+  );
+});
+
+test('Cluster device picker offers On/Off and Dimmer switches, as plain toggles', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const switches = fs.readFileSync(path.join(root, 'js/switches.js'), 'utf8');
+
+  // A cluster row is only ever a simple toggle, so the shared picker list
+  // (_clusterAvailableDeviceList - used by both the quick-add popup and the
+  // Device Config popup's own Cluster section) restricts candidates to
+  // Domoticz SwitchTypes with a genuine binary on/off state: plain
+  // 'On/Off' switches, and Dimmers (a cluster row never renders a
+  // brightness slider, so a Dimmer here behaves exactly like a plain
+  // switch). Blinds, Selectors, sensors and other switch types without a
+  // plain on/off semantic stay excluded.
+  assert.match(
+    deviceEditor,
+    /function _clusterAvailableDeviceList\(\) \{[\s\S]{0,500}?live\.SwitchType === 'On\/Off' \|\| live\.SwitchType === 'Dimmer'[\s\S]{0,40}?\}/
+  );
+
+  // js/components/cluster.js's switchRowHtml() only ever renders the
+  // toggle markup (.cluster-row-switch), never a brightness slider, for
+  // every row regardless of the underlying device's own SwitchType.
+  assert.doesNotMatch(cluster, /slider|dimmer/i);
+
+  // The click handler's toggle command (js/switches.js's switchDevice(),
+  // via the shared group/cluster "pass pMode straight through" path) sends
+  // a plain switchlight On/Off command with no level parameter of its own
+  // - the same command Domoticz already treats as a full on/off toggle for
+  // a Dimmer (turning it on to its last level, or off), so no Dimmer-
+  // specific branch is needed there.
+  assert.match(
+    switches,
+    /block\.type === 'group' \|\| block\.type === 'cluster'/
+  );
+});
+
+test("Cluster rows can show a companion device's power consumption", () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+  const saveblocks = fs.readFileSync(
+    path.join(root, 'js/saveblocks.php'),
+    'utf8'
+  );
+
+  // A switch's own idx has no wattage of its own - many switches
+  // (Shelly/Zigbee2MQTT/Sonoff plugs) report it through a separate
+  // companion device instead (Domoticz Type 'Usage', or 'General'/'kWh').
+  // The candidate list is restricted to those two shapes, never the
+  // switches themselves.
+  assert.match(deviceEditor, /function _clusterUsageDeviceList\(\) \{/);
+  assert.match(
+    deviceEditor,
+    /d\.Type === 'Usage' \|\| \(d\.Type === 'General' && d\.SubType === 'kWh'\)/
+  );
+
+  // Candidates are sorted so a name sharing a long prefix with the switch's
+  // own name (e.g. a Shelly's own "-1" vs its paired "-energy" device) is
+  // offered first - a convenience default, not a strict filter.
+  assert.match(deviceEditor, /function _clusterSortUsageCandidates\(/);
+
+  // The picker is wired into both the quick-add popup and the Device
+  // Config popup's own Cluster section, and both persist the pick as an
+  // idx->idx 'usage' map alongside 'devices' - not raw-editable generic
+  // custom fields, same reasoning as 'devices' itself (see the
+  // duplicate-field regression this mirrors).
+  assert.match(deviceEditor, /cl-usage-select/);
+  assert.match(deviceEditor, /customKeys\.usage = true;/);
+  assert.match(
+    deviceEditor,
+    /field: 'usage',\s*\n\s*setting: JSON\.stringify\(/
+  );
+  assert.match(
+    deviceEditor,
+    /return\s*\(\s*field !== 'devices' &&\s*field !== 'usage' &&\s*field !== 'mode' &&\s*field !== 'titles' &&\s*field !== 'switchscale' &&\s*field !== 'fontsize' &&\s*field !== 'icons'\s*\);/
+  );
+
+  // js/components/cluster.js: subscribes to each referenced companion
+  // device (so its own updates trigger a re-render even while the switch
+  // stays on) and reads the right field per Domoticz Type - a plain
+  // 'Usage' device's current reading is in .Data, while a kWh meter's .Data
+  // is its cumulative energy instead, with the *current* wattage in .Usage.
+  assert.match(
+    cluster,
+    /me\.usageMap = me\.mode === 'switch' \? me\.block\.usage \|\| \{\} : \{\};/
+  );
+  assert.match(cluster, /Dashticz\.subscribeDevice\(me, usageIdx, false,/);
+  assert.match(cluster, /usageDevice\.Type === 'Usage'/);
+  assert.match(cluster, /cluster-row-usage/);
+
+  // Server-side: the usage map is validated, not trusted verbatim (see the
+  // php-security.test.js counterpart for the exact error strings).
+  assert.match(saveblocks, /isset\(\$customFields\['usage'\]\)/);
+
+  assert.match(css, /\.cluster-row-usage \{/);
+});
+
+test('Cluster rows can be Switch or Temperature, never mixed', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+  const saveblocks = fs.readFileSync(
+    path.join(root, 'js/saveblocks.php'),
+    'utf8'
+  );
+
+  // The candidate list for Temperature mode is restricted to plain
+  // temperature-reporting Domoticz Types, built independently of
+  // _getAvailableDevices() (whose sub-value expansion would otherwise hide
+  // a whole Temp+Humidity+Baro device behind un-offerable idx_1/2/3
+  // entries - see the function's own comment).
+  assert.match(deviceEditor, /function _clusterTemperatureDeviceList\(\) \{/);
+  assert.match(deviceEditor, /'Temp \+ Humidity \+ Baro': true,/);
+
+  // A shared mode-button pair (mirroring the existing Dial/Bar/Needle
+  // mutually-exclusive button-group pattern already used elsewhere in this
+  // same popup) is rendered in both the quick-add popup and the Device
+  // Config popup's own Cluster section, and clicking it clears whatever
+  // was picked under the other mode - the two device sets never overlap.
+  assert.match(deviceEditor, /function _clusterModeButtonsHtml\(/);
+  assert.match(deviceEditor, /cl-mode-button/);
+  assert.match(
+    deviceEditor,
+    /pendingDevices = \[\];\s*\n\s*deviceList =\s*\n\s*clusterMode === 'temperature'/
+  );
+  assert.match(
+    deviceEditor,
+    /clusterPendingDevices = \[\];\s*\n\s*clusterDeviceList =\s*\n\s*clusterMode === 'temperature'/
+  );
+
+  // Persisted as an optional 'mode' custom field (temperature-only;
+  // absent means the default switch rows) - filtered out of the generic
+  // custom-fields list like devices/usage, and reserved so a hand-typed
+  // 'mode' field can't collide with it.
+  assert.match(deviceEditor, /customKeys\.mode = true;/);
+  assert.match(
+    deviceEditor,
+    /field !== 'devices' &&\s*field !== 'usage' &&\s*field !== 'mode' &&\s*field !== 'titles' &&\s*field !== 'switchscale'/
+  );
+  assert.match(deviceEditor, /field: 'mode',\s*\n\s*setting: 'temperature',/);
+
+  // js/components/cluster.js: temperature rows read the device's own .Temp
+  // field directly (no companion device, unlike switch mode's usage map)
+  // and never wire a switch click handler.
+  assert.match(
+    cluster,
+    /me\.mode =\s*me\.block\.mode === 'temperature' \|\| me\.block\.mode === 'other'\s*\? me\.block\.mode\s*: 'switch';/
+  );
+  assert.match(cluster, /function temperatureRowHtml\(/);
+  assert.match(cluster, /device\.Temp\.toFixed\(1\) \+ _TEMP_SYMBOL/);
+  assert.match(cluster, /if \(me\.mode !== 'switch'\) return;/);
+
+  // Other ("Overige") rows show the device's own Data value, for every
+  // device that is neither a switch nor a temperature reading.
+  assert.match(cluster, /function otherRowHtml\(/);
+  assert.match(cluster, /me\.mode === 'other'/);
+  assert.match(deviceEditor, /function _clusterOtherDeviceList\(\) \{/);
+  assert.match(
+    deviceEditor,
+    /if \(d\.SwitchType \|\| temperatureIdx\[idx\]\) return;/
+  );
+  assert.match(
+    deviceEditor,
+    /mode: 'other',\s*\n\s*label: t\.cluster_mode_other,/
+  );
+  assert.match(deviceEditor, /field: 'mode', setting: 'other', value: 'other'/);
+  assert.match(saveblocks, /\$customFields\['mode'\] !== 'other'/);
+  assert.match(css, /\.cluster-row-temp \{/);
+
+  // Server-side: only 'temperature' (or absent) is a valid mode.
+  assert.match(saveblocks, /\$customFields\['mode'\] !== 'temperature'/);
+});
+
+test('Cluster row type is locked once the cluster has been saved', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+
+  // The Device Config popup only ever edits an already-saved cluster (a
+  // pending, not-yet-saved block never gets a cog - see
+  // openLayoutConfig()), so switching mode there would silently orphan its
+  // already-picked devices instead of clearing a pending pick the way the
+  // quick-add popup (never locked) does - _clusterModeButtonsHtml's own
+  // `locked` param disables both buttons, and the click handler still
+  // guards against it defensively.
+  assert.match(
+    deviceEditor,
+    /function _clusterModeButtonsHtml\(\s*idPrefix,\s*t,\s*mode,\s*locked,\s*switchScaleValue,\s*fontSizeValue\s*\)\s*\{/
+  );
+  assert.match(deviceEditor, /\(locked \? ' disabled' : ''\)/);
+  assert.match(
+    deviceEditor,
+    /_clusterModeButtonsHtml\(\s*'de-config',\s*t,\s*clusterMode,\s*true,\s*clusterSwitchScaleValue,\s*clusterFontSizeValue\s*\);/
+  );
+  assert.match(
+    deviceEditor,
+    /if \(\$\(this\)\.prop\('disabled'\)\) return;\s*\n\s*var mode = String\(\$\(this\)\.attr\('data-cluster-mode'\)/
+  );
+
+  // The quick-add popup's own call passes locked: false, i.e. stays
+  // unlocked (nothing is saved yet there).
+  assert.match(
+    deviceEditor,
+    /html \+= _clusterModeButtonsHtml\(\s*'cl',\s*t,\s*clusterMode,\s*false,\s*clusterSwitchScaleValue,\s*clusterFontSizeValue\s*\);/
+  );
+});
+
+test('Cluster row names can be customized per device, like a normal device Title', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const saveblocks = fs.readFileSync(
+    path.join(root, 'js/saveblocks.php'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // The row's device name in the pending list is now an editable input
+  // (placeholder shows the live Domoticz name so an empty value visibly
+  // means "use the device name"), not a static span.
+  assert.match(deviceEditor, /cl-name-input/);
+  assert.match(deviceEditor, /placeholder="' \+\s*\n\s*_esc\(d\.name\) \+/);
+
+  // Persisted as an optional 'titles' map (device idx -> custom name),
+  // same shape/reasoning as 'usage' - filtered out of the generic
+  // custom-fields list and reserved, wired into both popups' save
+  // handlers and the quick-add popup's own live state.
+  assert.match(deviceEditor, /customKeys\.titles = true;/);
+  assert.match(deviceEditor, /field !== 'titles'/);
+  assert.match(deviceEditor, /if \(d\.title\) titlesMap\[d\.idx\] = d\.title;/);
+  assert.match(
+    deviceEditor,
+    /if \(d\.title\) clusterTitlesOut\[d\.idx\] = d\.title;/
+  );
+
+  // js/components/cluster.js: falls back to the device's own Domoticz
+  // Name when no override is set - never blank.
+  assert.match(cluster, /me\.titlesMap = me\.block\.titles \|\| \{\};/);
+  assert.match(
+    cluster,
+    /var title = me\.titlesMap\[idx\] \|\| device\.Name \|\| idx;/
+  );
+
+  // Server-side: keys must be one of the block's own devices, values
+  // non-empty strings.
+  assert.match(saveblocks, /isset\(\$customFields\['titles'\]\)/);
+  assert.match(
+    saveblocks,
+    /A cluster block\\'s titles map key must be one of its own devices\./
+  );
+  assert.match(
+    saveblocks,
+    /A cluster block\\'s titles map values must be non-empty strings\./
+  );
+
+  assert.match(css, /\.cl-name-input \{/);
+});
+
+test('Cluster switch can be resized via a switchScale field next to the Row type buttons', () => {
+  const deviceEditor = fs.readFileSync(
+    path.join(root, 'js/deviceeditor.js'),
+    'utf8'
+  );
+  const cluster = fs.readFileSync(
+    path.join(root, 'js/components/cluster.js'),
+    'utf8'
+  );
+  const saveblocks = fs.readFileSync(
+    path.join(root, 'js/saveblocks.php'),
+    'utf8'
+  );
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // Rendered inline (a 5-character-wide input per request, not a stacked
+  // mb-3 block) right next to the Switch/Temperature buttons -
+  // _clusterModeButtonsHtml calls it itself rather than callers rendering
+  // it as a separate field below, and it's hidden entirely in Temperature
+  // mode (no switches there to size).
+  assert.match(deviceEditor, /function _clusterSwitchScaleFieldHtml\(/);
+  assert.match(
+    deviceEditor,
+    /if \(!_clusterUsesSwitchRows\(mode\)\) return '';/
+  );
+  assert.match(deviceEditor, /width:10ch/);
+  assert.match(
+    deviceEditor,
+    /_clusterSwitchScaleFieldHtml\(idPrefix, t, mode, switchScaleValue\)/
+  );
+
+  // Parsed/clamped client-side to the same 0.3-3 range saveblocks.php
+  // enforces server-side, read back from both popups' own inputs and
+  // reserved so a hand-typed 'switchScale' custom field can't collide.
+  assert.match(deviceEditor, /function _readClusterSwitchScale\(/);
+  assert.match(deviceEditor, /customKeys\.switchscale = true;/);
+
+  // Font size of the whole cluster (like HP iLO's font size): a per-block
+  // fontSize custom field (8-60px) next to the row type buttons, applied by
+  // cluster.js through --font-device-title and validated in saveblocks.php.
+  assert.match(deviceEditor, /function _clusterFontSizeFieldHtml\(/);
+  assert.match(deviceEditor, /function _readClusterFontSize\(/);
+  assert.match(deviceEditor, /customKeys\.fontsize = true;/);
+
+  // Per-row icons (the HP iLO look): an icons map (idx -> 'auto' or a Font
+  // Awesome class) picked from a pull-down in every pending row, rendered
+  // by cluster.js in front of the name, validated in saveblocks.php.
+  assert.match(deviceEditor, /function _clusterIconPickerHtml\(/);
+  // creative.css has per-icon margin offsets of its own (.fas.fa-lightbulb,
+  // .fas.fa-plug, ...) for the big tile icon; row icons reset them so every
+  // icon lines up in the same column.
+  assert.match(
+    fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8'),
+    /\.cluster-block \.dt_state \.cluster-row-icon \{[^}]*margin: 0 !important;/
+  );
+  assert.match(deviceEditor, /customKeys\.icons = true;/);
+  assert.match(deviceEditor, /field: 'icons',/);
+  assert.match(
+    fs.readFileSync(path.join(root, 'js/components/cluster.js'), 'utf8'),
+    /cluster-row-icon/
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, 'js/saveblocks.php'), 'utf8'),
+    /icons map values must be Font Awesome class names/
+  );
+  assert.match(deviceEditor, /field: 'fontSize',/);
+  assert.match(
+    fs.readFileSync(path.join(root, 'js/components/cluster.js'), 'utf8'),
+    /'--font-device-title',/
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, 'js/saveblocks.php'), 'utf8'),
+    /fontSize must be between 8 and 60\./
+  );
+  assert.match(deviceEditor, /field !== 'switchscale'/);
+  assert.match(
+    deviceEditor,
+    /field: 'switchScale',\s*\n\s*setting: String\(switchScale\),/
+  );
+  assert.match(
+    deviceEditor,
+    /field: 'switchScale',\s*\n\s*setting: String\(editSwitchScale\),/
+  );
+
+  // js/components/cluster.js applies it as a CSS custom property on every
+  // refresh (not just run()), so a live config update without a full page
+  // reload still picks up a changed value.
+  assert.match(
+    cluster,
+    /var switchScale = parseFloat\(me\.block\.switchScale\);/
+  );
+  assert.match(
+    cluster,
+    /'--cluster-switch-scale',\s*\n\s*switchScale > 0 \? switchScale : ''/
+  );
+
+  // css/creative.css: every scaled dimension is read with a var()
+  // fallback of 1 (never declared on the same selector - see
+  // .cluster-row-switch's own comment) so the switch renders at normal
+  // size when unset, and the row's own gap to .cluster-row-usage scales
+  // the same way so a bigger switch doesn't crowd its neighbour.
+  assert.match(css, /width: calc\(66px \* var\(--cluster-switch-scale, 1\)\);/);
+  assert.match(css, /gap: calc\(8px \* var\(--cluster-switch-scale, 1\)\);/);
+
+  // Server-side: must be a number within 0.3-3.
+  assert.match(saveblocks, /isset\(\$customFields\['switchScale'\]\)/);
+  assert.match(
+    saveblocks,
+    /A cluster block\\'s switchScale must be a number\./
+  );
+  assert.match(
+    saveblocks,
+    /A cluster block\\'s switchScale must be between 0\.3 and 3\./
   );
 });
 
@@ -5671,10 +6412,7 @@ test('rendered Graph blocks keep the Layout Editor config cog and open their own
     /\(!definition\.type \|\| definition\.type === key\) &&\s*\n\s*Array\.isArray\(definition\.devices\)/
   );
   assert.match(layoutEditor, /kind: 'graph',/);
-  assert.match(
-    layoutEditor,
-    /var REFERENCE_BASED_SPECIAL_KINDS = \[[\s\S]{0,500}?'graph'[\s\S]{0,50}?\];/
-  );
+  assertReferenceBasedKind(layoutEditor, 'graph');
 
   // Clicking that cog routes through Device Editor. It must accept the same
   // key-as-type artifact so openLayoutConfig(reference) resolves the exact
@@ -6516,10 +7254,12 @@ test('Trafficinfo widget is RWS-only - no provider choice, no ANWB/Custom code p
   assert.doesNotMatch(trafficinfo, /_buildCustomDataPart/);
   assert.match(
     trafficinfo,
-    /canHandle: function \(block\) \{\s*\n\s*return block && \(block\.trafficJams \|\| block\.roadWorks \|\| block\.radars\);/
+    /canHandle: function \(block\) \{\s*\n\s*return block && \(block\.trafficJams \|\| block\.roadWorks\);/
   );
+  // The data comes from the cached bridge (vendor/dashticz/rws/index.php).
+  assert.match(trafficinfo, /DT_function\.rwsTrafficUrl\(\)/);
   assert.match(
-    trafficinfo,
+    fs.readFileSync(path.join(root, 'vendor/dashticz/rws/index.php'), 'utf8'),
     /'https:\/\/api\.rwsverkeersinfo\.nl\/api\/traffic\/'/
   );
   // obstructionType 1 = roadworks, 4 = jam (Rijkswaterstaat's own schema).
@@ -6563,9 +7303,10 @@ test('Trafficinfo settings/Widget editor: no global settings, no provider select
   // number field - not raw rows in the generic "Extra fields" editor.
   assert.match(widgetEditor, /_cfgField\(\s*\n\s*'trafficJams',/);
   assert.match(widgetEditor, /_cfgField\(\s*\n\s*'roadWorks',/);
-  assert.match(widgetEditor, /_cfgField\(\s*\n\s*'radars',/);
+  // The RWS API has no radar category: no toggle for it.
+  assert.doesNotMatch(widgetEditor, /_cfgField\(\s*\n\s*'radars',/);
   assert.match(widgetEditor, /_cfgField\(\s*\n\s*'results',/);
-  for (const key of ['trafficJams', 'roadWorks', 'radars']) {
+  for (const key of ['trafficJams', 'roadWorks']) {
     const field = widgetEditor.slice(
       widgetEditor.indexOf(`_cfgField(\n        '${key}',`)
     );
@@ -6573,7 +7314,15 @@ test('Trafficinfo settings/Widget editor: no global settings, no provider select
   }
   assert.match(
     widgetEditor,
-    /trafficinfo: \{\s*\n[\s\S]{0,600}provider: true,\s*\n\s*trafficJams: true,\s*\n\s*roadWorks: true,\s*\n\s*radars: true,\s*\n\s*results: true,\s*\n\s*maxDistance: true,\s*\n\s*latitude: true,\s*\n\s*longitude: true,\s*\n\s*\},/
+    /<div class="we-switch-grid we-switch-grid-three">[\s\S]*?'trafficJams',[\s\S]*?'roadWorks',[\s\S]*?fields \+= '<\/div>';/
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8'),
+    /\.we-switch-grid\.we-switch-grid-three\s*\{\s*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/
+  );
+  assert.match(
+    widgetEditor,
+    /trafficinfo: \{\s*\n[\s\S]{0,600}provider: true,[\s\S]{0,200}?radars: true,\s*\n\s*trafficJams: true,\s*\n\s*roadWorks: true,\s*\n\s*results: true,\s*\n\s*maxDistance: true,\s*\n\s*latitude: true,\s*\n\s*longitude: true,\s*\n\s*filter: true,\s*\n\s*road: true,\s*\n\s*showemptyroads: true,\s*\n\s*\},/
   );
 
   // Defaults: 5 results, 40km max distance shown in the field and used
@@ -6599,14 +7348,14 @@ test('Trafficinfo settings/Widget editor: no global settings, no provider select
       hydrationMatches ? hydrationMatches.length : 0
     }`
   );
-  assert.match(widgetEditor, /\['radars', 1\],/);
+  assert.doesNotMatch(widgetEditor, /\['radars', 1\],/);
 
   // The saved payload entry carries trafficJams/roadWorks/radars/results/
   // maxDistance directly (like publictransport's own provider) - no
   // entry.provider/customUrl anywhere.
   assert.match(widgetEditor, /entry\.trafficJams = Number\(/);
   assert.match(widgetEditor, /entry\.roadWorks = Number\(/);
-  assert.match(widgetEditor, /entry\.radars = Number\(/);
+  assert.doesNotMatch(widgetEditor, /entry\.radars = Number\(/);
   assert.match(
     widgetEditor,
     /entry\.results = parseInt\(trcfg\.results, 10\) \|\| 5;/
@@ -6649,7 +7398,7 @@ test('savewidgets.php: trafficinfo save bug - the request handler had no case re
   );
   assert.match(extractBlock, /\$widget\['trafficJams'\]/);
   assert.match(extractBlock, /\$widget\['roadWorks'\]/);
-  assert.match(extractBlock, /\$widget\['radars'\]/);
+  assert.doesNotMatch(extractBlock, /\$widget\['radars'\]/);
   assert.match(
     extractBlock,
     /\$widget\['results'\] = max\(1, min\(500, \$results\)\);/
@@ -6670,7 +7419,7 @@ test('savewidgets.php: trafficinfo save bug - the request handler had no case re
     /\$props\['trafficJams'\] = \$widget\['trafficJams'\];/
   );
   assert.match(caseBlock, /\$props\['roadWorks'\] = \$widget\['roadWorks'\];/);
-  assert.match(caseBlock, /\$props\['radars'\] = \$widget\['radars'\];/);
+  assert.doesNotMatch(caseBlock, /\$props\['radars'\]/);
   assert.match(caseBlock, /\$props\['results'\] = \$widget\['results'\];/);
   assert.match(
     caseBlock,
@@ -6709,13 +7458,28 @@ test('Trafficinfo distance filter: haversine math, fail-open behaviour, and RWS 
   const ctx = loadTrafficInfoModule();
 
   // Amsterdam Dam Square to Utrecht Dom: actually about 35.7km straight-line.
-  const km = ctx._distanceKm(52.373, 4.8925, 52.0908, 5.1214);
+  const km = ctx.DT_trafficinfo.internals._distanceKm(
+    52.373,
+    4.8925,
+    52.0908,
+    5.1214
+  );
   assert.ok(km > 34 && km < 37, `expected ~35.7km, got ${km}`);
 
   // No maxDistance configured -> filter inactive, everything kept.
-  assert.equal(ctx._hasDistanceFilter({ latitude: 52, longitude: 5 }), false);
   assert.equal(
-    ctx._isWithinDistance({ latitude: 52, longitude: 5 }, 60, 10),
+    ctx.DT_trafficinfo.internals._hasDistanceFilter({
+      latitude: 52,
+      longitude: 5,
+    }),
+    false
+  );
+  assert.equal(
+    ctx.DT_trafficinfo.internals._isWithinDistance(
+      { latitude: 52, longitude: 5 },
+      60,
+      10
+    ),
     true
   );
 
@@ -6724,7 +7488,7 @@ test('Trafficinfo distance filter: haversine math, fail-open behaviour, and RWS 
   // from going silently empty if _rwsCoords ever guesses a wrong field name
   // for live RWS data.
   assert.equal(
-    ctx._isWithinDistance(
+    ctx.DT_trafficinfo.internals._isWithinDistance(
       { latitude: 52, longitude: 5, maxDistance: 10 },
       NaN,
       NaN
@@ -6734,8 +7498,14 @@ test('Trafficinfo distance filter: haversine math, fail-open behaviour, and RWS 
 
   // Within range vs out of range.
   const near = { latitude: 52.373, longitude: 4.8925, maxDistance: 10 };
-  assert.equal(ctx._isWithinDistance(near, 52.38, 4.9), true);
-  assert.equal(ctx._isWithinDistance(near, 52.09, 5.12), false);
+  assert.equal(
+    ctx.DT_trafficinfo.internals._isWithinDistance(near, 52.38, 4.9),
+    true
+  );
+  assert.equal(
+    ctx.DT_trafficinfo.internals._isWithinDistance(near, 52.09, 5.12),
+    false
+  );
 
   // _rwsCoords reads the confirmed flat latitude/longitude fields (verified
   // against a live obstruction object).
@@ -6745,11 +7515,14 @@ test('Trafficinfo distance filter: haversine math, fail-open behaviour, and RWS 
     assert.equal(coords.lon, expectedLon);
   }
   assertCoords(
-    ctx._rwsCoords({ latitude: '52.1', longitude: '5.2' }),
+    ctx.DT_trafficinfo.internals._rwsCoords({
+      latitude: '52.1',
+      longitude: '5.2',
+    }),
     52.1,
     5.2
   );
-  assert.equal(ctx._rwsCoords({}), null);
+  assert.equal(ctx.DT_trafficinfo.internals._rwsCoords({}), null);
 
   // End-to-end through _buildRWSDataPart: a far-away jam is filtered out, a
   // nearby one stays, and one with no coordinates at all is never hidden.
@@ -6763,7 +7536,7 @@ test('Trafficinfo distance filter: haversine math, fail-open behaviour, and RWS 
       maxDistance: 10,
     },
   };
-  const result = ctx._buildRWSDataPart(me, {
+  const result = ctx.DT_trafficinfo.internals._buildRWSDataPart(me, {
     obstructions: [
       {
         obstructionType: 4,
@@ -6818,6 +7591,258 @@ test("Trafficinfo defaultCfg falls back to Domoticz's own location, block overri
   assert.equal(withOverride.maxDistance, 25);
 });
 
+// Issue #1321: traffic info for selected roads (the 3.x `road` option) as a
+// second filter next to the distance filter.
+function loadTrafficInfoWithRender() {
+  const ctx = loadTrafficInfoModule();
+  ctx.rendered = '';
+  ctx.$ = () => ({
+    html(value) {
+      ctx.rendered = value;
+    },
+    append(value) {
+      ctx.rendered += value;
+    },
+  });
+  return ctx;
+}
+
+const trafficRoadData = {
+  obstructions: [
+    {
+      obstructionType: 4,
+      roadNumber: 'A17',
+      latitude: 51.5,
+      longitude: 4.5,
+      directionText: 'Moerdijk - Rotterdam',
+      locationText: 'Tussen Klaaswaal en Rotterdam.',
+      cause: 'Door een ongeval',
+      delay: 12,
+      length: 3000,
+    },
+    {
+      obstructionType: 4,
+      roadNumber: 'A4',
+      latitude: 53.5,
+      longitude: 6.5,
+      directionText: 'Amsterdam - Den Haag',
+      locationText: 'Eerste melding A4.',
+    },
+    {
+      obstructionType: 1,
+      roadNumber: 'A4',
+      directionText: 'Den Haag - Amsterdam',
+      locationText: 'Tweede melding A4.',
+    },
+    {
+      obstructionType: 4,
+      roadNumber: 'A2',
+      directionText: 'Utrecht - Amsterdam',
+      locationText: 'Melding <b>A2</b>.',
+    },
+  ],
+};
+
+test('Trafficinfo road filter: road list parsing and filter selection (#1321)', () => {
+  const ctx = loadTrafficInfoModule();
+  // Commas or semicolons, any spacing/case, duplicates removed, order kept.
+  assert.deepEqual(
+    Array.from(ctx.DT_trafficinfo.internals._parseRoads(' a4, A17;a 4 ,n201 ')),
+    ['A4', 'A17', 'N201']
+  );
+  assert.deepEqual(
+    Array.from(ctx.DT_trafficinfo.internals._parseRoads(['A4', 'a17'])),
+    ['A4', 'A17']
+  );
+  assert.deepEqual(
+    Array.from(ctx.DT_trafficinfo.internals._parseRoads(undefined)),
+    []
+  );
+
+  // A hand-written 3.x block with a road list and no filter keeps filtering
+  // on its roads; an explicit filter always wins; default is distance.
+  assert.equal(ctx.DT_trafficinfo.defaultCfg({ road: 'A4' }).filter, 'roads');
+  assert.equal(
+    ctx.DT_trafficinfo.defaultCfg({ road: 'A4', filter: 'distance' }).filter,
+    'distance'
+  );
+  assert.equal(ctx.DT_trafficinfo.defaultCfg({}).filter, 'distance');
+});
+
+test('Trafficinfo road filter: only the selected roads, in their order, per-road limit, empty roads (#1321)', () => {
+  const ctx = loadTrafficInfoWithRender();
+  const me = {
+    mountPoint: '#test',
+    block: {
+      filter: 'roads',
+      road: 'A17, A4, A12',
+      trafficJams: true,
+      roadWorks: true,
+      results: 1,
+      showemptyroads: true,
+      // Far away from every obstruction: the distance filter must not apply
+      // in roads mode.
+      latitude: 0,
+      longitude: 0,
+      maxDistance: 1,
+    },
+  };
+  const result = ctx.DT_trafficinfo.internals._buildRWSDataPart(
+    me,
+    trafficRoadData
+  );
+  assert.deepEqual(Object.keys(result.dataPart).sort(), ['A17', 'A4']);
+  assert.ok(!result.dataPart.A2, 'roads that are not selected are left out');
+  assert.equal(result.dataPart.A4.length, 2);
+  assert.ok(
+    result.dataPart.A17.join('').includes('Door een ongeval'),
+    'the cause is shown'
+  );
+
+  ctx.DT_trafficinfo.internals._renderTrafficInfo(
+    me,
+    result.dataPart,
+    result.noData,
+    result.roadArray
+  );
+  const html = ctx.rendered;
+  // Configured order: A17 before A4 before A12.
+  assert.ok(html.indexOf('A17') < html.indexOf('>A4<'));
+  assert.ok(html.indexOf('>A4<') < html.indexOf('>A12<'));
+  // results is a per-road limit in roads mode.
+  assert.ok(html.includes('Eerste melding A4.'));
+  assert.ok(!html.includes('Tweede melding A4.'));
+  // showemptyroads lists a selected road without announcements once.
+  assert.equal(html.split('>A12<').length - 1, 1);
+  assert.ok(html.includes('No traffic announcements'));
+
+  // A custom empty-road text is used as such.
+  me.block.showemptyroads = 'Rustig';
+  ctx.DT_trafficinfo.internals._renderTrafficInfo(
+    me,
+    result.dataPart,
+    result.noData,
+    result.roadArray
+  );
+  assert.ok(ctx.rendered.includes('Rustig'));
+});
+
+test('Trafficinfo distance mode: road list ignored, total limit, RWS text escaped (#1321)', () => {
+  const ctx = loadTrafficInfoWithRender();
+  const me = {
+    mountPoint: '#test',
+    block: {
+      filter: 'distance',
+      road: 'A17',
+      trafficJams: true,
+      roadWorks: true,
+      results: 2,
+    },
+  };
+  const result = ctx.DT_trafficinfo.internals._buildRWSDataPart(
+    me,
+    trafficRoadData
+  );
+  assert.deepEqual(Object.keys(result.dataPart).sort(), ['A17', 'A2', 'A4']);
+  ctx.DT_trafficinfo.internals._renderTrafficInfo(
+    me,
+    result.dataPart,
+    result.noData,
+    result.roadArray
+  );
+  // Road-number order (A2, A4, A17) with 2 announcements in total.
+  assert.ok(ctx.rendered.includes('Melding &lt;b&gt;A2&lt;/b&gt;.'));
+  assert.ok(ctx.rendered.includes('Eerste melding A4.'));
+  assert.ok(!ctx.rendered.includes('Tweede melding A4.'));
+  assert.ok(!ctx.rendered.includes('Klaaswaal'));
+});
+
+test('Trafficinfo announcement text: direction with a hyphenated place name, no zero delay/length', () => {
+  const ctx = loadTrafficInfoModule();
+  const result = ctx.DT_trafficinfo.internals._buildRWSDataPart(
+    { block: { filter: 'roads', road: 'A2', roadWorks: true, results: 5 } },
+    {
+      obstructions: [
+        {
+          obstructionType: 1,
+          roadNumber: 'A2',
+          directionText: "Utrecht - 's-Hertogenbosch",
+          delay: 0,
+          length: 0,
+          locationText: 'Rijstrook dicht.',
+        },
+      ],
+    }
+  );
+  const html = result.dataPart.A2.join('');
+  assert.ok(html.includes('Utrecht</b><b> - &#39;s-Hertogenbosch'));
+  assert.ok(!html.includes('0.0km'));
+  assert.ok(!html.includes('+ 0min'));
+});
+
+test('Trafficinfo Widget Config and save: Distance/Roads filter, road list and empty roads (#1321)', () => {
+  const widgetEditor = fs.readFileSync(
+    path.join(root, 'js/widgeteditor.js'),
+    'utf8'
+  );
+  assert.match(widgetEditor, /_cfgField\(\s*\n\s*'filter',/);
+  assert.match(widgetEditor, /_cfgField\(\s*\n\s*'road',/);
+  assert.match(widgetEditor, /_cfgField\(\s*\n\s*'showemptyroads',/);
+  assert.match(widgetEditor, /data-traffic-filter="roads"/);
+  assert.match(widgetEditor, /data-traffic-filter="distance"/);
+  assert.match(widgetEditor, /\$cfgModal\.on\('change', '#we-cfg-filter'/);
+  // Both scan paths (column and grid screens) read the filter back.
+  assert.equal(
+    (widgetEditor.match(/_hydrateTrafficRoadFilter\(definition\);/g) || [])
+      .length,
+    2
+  );
+  assert.match(
+    widgetEditor,
+    /entry\.filter = trcfg\.filter === 'roads' \? 'roads' : 'distance';/
+  );
+
+  const savewidgets = fs.readFileSync(
+    path.join(root, 'js/savewidgets.php'),
+    'utf8'
+  );
+  const extractStart = savewidgets.indexOf("if (\$id === 'trafficinfo') {");
+  const extractBlock = savewidgets.slice(
+    extractStart,
+    savewidgets.indexOf("if (\$id === 'camera') {", extractStart)
+  );
+  assert.match(extractBlock, /\$widget\['filter'\]/);
+  assert.match(extractBlock, /\$widget\['road'\] = \$road;/);
+  assert.match(extractBlock, /\$widget\['showemptyroads'\]/);
+  const caseStart = savewidgets.indexOf("case 'trafficinfo':");
+  const caseBlock = savewidgets.slice(
+    caseStart,
+    savewidgets.indexOf('break;', caseStart)
+  );
+  assert.match(caseBlock, /\$props\['filter'\] = \$widget\['filter'\];/);
+  assert.match(caseBlock, /\$props\['road'\] = \$widget\['road'\];/);
+  assert.match(
+    caseBlock,
+    /\$props\['showemptyroads'\] = \$widget\['showemptyroads'\];/
+  );
+
+  for (const file of ['en_US', 'nl_NL', 'fr_FR']) {
+    const lang = JSON.parse(
+      fs.readFileSync(path.join(root, 'lang', file + '.json'), 'utf8')
+    );
+    for (const key of [
+      'traffic_filter',
+      'traffic_filter_distance',
+      'traffic_filter_roads',
+      'traffic_roads',
+      'traffic_roads_help',
+      'traffic_showemptyroads',
+    ]) {
+      assert.ok(lang.settings.widgets[key], file + ' ' + key);
+    }
+  }
+});
+
 test('Traffic info translations: no ANWB/provider keys left, jams/roadworks/results/distance keys exist', () => {
   const english = JSON.parse(
     fs.readFileSync(path.join(root, 'lang/en_US.json'), 'utf8')
@@ -6841,4 +7866,874 @@ test('Traffic info translations: no ANWB/provider keys left, jams/roadworks/resu
     english.settings.widgeteditor.trafficinfo_description || '',
     /ANWB/
   );
+});
+
+test('Dashboard blocks get a themed shine-sweep hover, without overflow: hidden', () => {
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // .dt_block hosts every kind of block (dials, graphs, dropdowns, camera
+  // popups, ...), and some rely on their own content overflowing its box
+  // (see e.g. .dle-block's own overflow: visible !important while the
+  // Layout Editor is open) - the shine is a second background layer with
+  // an animated background-position rather than a translated element
+  // like the Add-items tile's own version, specifically so it never needs
+  // overflow: hidden on .dt_block itself (a background is always clipped
+  // to the element's own box regardless of the element's own overflow
+  // setting).
+  const blockRuleMatch = css.match(/\.dt_block \{[\s\S]{0,400}?\n\}/);
+  assert.ok(blockRuleMatch, 'expected to find the base .dt_block rule');
+  assert.match(blockRuleMatch[0], /position: relative;/);
+  assert.doesNotMatch(blockRuleMatch[0], /overflow:\s*hidden/);
+
+  assert.match(css, /\.dt_block::before \{/);
+  const beforeRuleMatch = css.match(/\.dt_block::before \{[\s\S]{0,600}?\n\}/);
+  assert.ok(beforeRuleMatch, 'expected to find the .dt_block::before rule');
+  assert.doesNotMatch(beforeRuleMatch[0], /overflow:\s*hidden/);
+  assert.match(beforeRuleMatch[0], /background-size: 200% 100%;/);
+
+  // Themed, not hardcoded: var(--button-active)/var(--border-color-active)
+  // already vary per theme (themes/modern-dark, themes/liquid-glass-*),
+  // the same pair an active/pressed .transbg button already uses.
+  assert.match(css, /var\(--dt-block-shine, var\(--button-active\)\)/);
+  assert.match(
+    css,
+    /@media \(hover: hover\) and \(pointer: fine\) \{\s*\n\s*\.dt_block:hover \{\s*\n\s*border-color: var\(--border-color-active\);/
+  );
+  assert.match(
+    css,
+    /\.dt_block:hover::before \{\s*\n\s*background-position: 150% 0;/
+  );
+});
+
+test('--main-bg stays gradient-safe wherever creative.css consumes it', () => {
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+
+  // --main-bg is a plain color in most themes, but themes/modern-dark now
+  // sets it to a linear-gradient() (per user request) - a background-
+  // color: var(--main-bg) declaration would be invalid wherever that's
+  // the *only* background rule for that selector (gradients aren't valid
+  // <color> values), silently dropping to transparent in that theme. Every
+  // such standalone use in creative.css was switched to the background
+  // shorthand instead, which accepts both a plain color and a gradient.
+  for (const selectorComment of [
+    /\.security-panel \{[\s\S]{0,200}?background: var\(--main-bg\);/,
+    /\.dialbtn\.middle \{\s*\n\s*background: var\(--main-bg\);/,
+    /\.colorpicker \.cp-buttonsOnOff \{\s*\n\s*background: var\(--main-bg\);/,
+  ]) {
+    assert.match(css, selectorComment);
+  }
+
+  // .dt_block/.transbg are the one deliberate exception: each already has
+  // an *earlier* full `background: var(--main-bg); background-clip:
+  // padding-box;` rule, so this later, shared rule only needs to refine
+  // background-color - switching it to the full shorthand too would reset
+  // that earlier background-clip back to its own initial (border-box).
+  assert.match(
+    css,
+    /\.transbg,\s*\n\.dt_block \{[\s\S]{0,600}?background-color: var\(--main-bg\);/
+  );
+});
+
+test('Selector Switch dropdown shows only its own levels, no generic placeholder option', () => {
+  const blocks = fs.readFileSync(path.join(root, 'js/blocks.js'), 'utf8');
+
+  // getSelectorSwitch()'s dropdown style (SelectorStyle 1) used to prepend
+  // a generic "Select..." placeholder (language.misc.select) above the
+  // device's own real levels - redundant (and, for a device whose own
+  // level 0 is itself named something like "Select"/"Off", visually
+  // duplicated) with the device's own levels, which already include
+  // whatever "please choose" framing the device's own naming provides.
+  // The button-style branch (the `else`, further down) never had this
+  // placeholder - only the dropdown did.
+  const dropdownBranch = blocks.match(
+    /device\['SelectorStyle'\] == 1\s*\n\s*\) \{[\s\S]{0,2500}?\/\/ No placeholder[\s\S]{0,1000}?<\/select>/
+  );
+  assert.ok(dropdownBranch, 'expected to find the SelectorStyle 1 branch');
+  assert.doesNotMatch(dropdownBranch[0], /language\.misc\.select/);
+  assert.doesNotMatch(dropdownBranch[0], /<option value=""/);
+
+  // The device's own hidden/off level (LevelOffHidden) is still respected
+  // - unrelated to, and unaffected by, removing the generic placeholder.
+  assert.match(
+    dropdownBranch[0],
+    /parseFloat\(nv\.value\) > 0 \|\|\s*\n\s*\(nv\.value == 0 &&\s*\n\s*\(typeof device\['LevelOffHidden'\] == 'undefined' \|\|\s*\n\s*device\['LevelOffHidden'\] === false\)\)/
+  );
+});
+
+test('HP iLO rows can each get their own icon, chosen in the widget config', () => {
+  const editor = fs.readFileSync(path.join(root, 'js/widgeteditor.js'), 'utf8');
+  const hpilo = fs.readFileSync(
+    path.join(root, 'js/components/hpilo.js'),
+    'utf8'
+  );
+  const save = fs.readFileSync(path.join(root, 'js/savewidgets.php'), 'utf8');
+
+  // A pull-down per row, stored as JSON in the hidden hpilo_icons field and
+  // saved together with the other HP iLO settings.
+  assert.match(editor, /function _hpiloIconPickerHtml\(/);
+  assert.match(editor, /data-cfg-key="hpilo_icons"/);
+  assert.match(editor, /'hpilo_rows',\s*'hpilo_icons',/);
+  // The renderer falls back to each row's own icon; 'none' hides it.
+  assert.match(hpilo, /settings\['hpilo_icons'\]/);
+  assert.match(hpilo, /if \(icon === 'none'\) return '';/);
+  // Server side: known rows and Font Awesome class names only.
+  assert.match(save, /'hpilo_icons'\s*=> 'hpilo_icons',/);
+  assert.match(save, /\$type === 'hpilo_icons'/);
+});
+
+function loadTvgidsModule() {
+  const source = fs.readFileSync(
+    path.join(root, 'js/components/tvgids.js'),
+    'utf8'
+  );
+  const context = {
+    language: { misc: { tvgids_empty: 'No more programmes today.' } },
+    settings: { dashticz_php_path: 'vendor/dashticz/' },
+    Dashticz: { register: () => {} },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/dt_function.js'), 'utf8'),
+    context
+  );
+  vm.runInContext(source, context);
+  return context.DT_tvgids;
+}
+
+test('TVgids block: dispatched on its channel list, columns follow the block width', () => {
+  const tvgids = loadTvgidsModule();
+  assert.equal(tvgids.canHandle({ tvgids: 'npo_1,rtl_4' }), true);
+  assert.equal(tvgids.canHandle({ tvgids: '' }), false);
+  // The old tvguide (block.channels) and XMLTV (xmltvurl) blocks stay theirs.
+  assert.equal(tvgids.canHandle({ channels: [1, 2] }), false);
+
+  const now = 1000000;
+  const programme = (start, end, title) => ({
+    start: now + start * 60,
+    end: now + end * 60,
+    title,
+  });
+  const channels = [
+    {
+      id: 'npo_1',
+      name: 'NPO 1',
+      programmes: [
+        programme(-90, -30, 'Finished'),
+        programme(-30, 20, 'On air'),
+        programme(20, 60, 'Next <b>'),
+        programme(60, 90, 'Later'),
+      ],
+    },
+    {
+      id: 'rtl_4',
+      name: 'RTL 4',
+      error: 'Unable to fetch the TV guide of rtl_4.',
+    },
+  ];
+
+  let html = tvgids.channelsHtml(
+    { tvgids: 'npo_1,rtl_4', tvgidsmaxitems: 2, tvgidscolumnwidth: 300 },
+    channels,
+    now
+  );
+  assert.match(html, /repeat\(auto-fill, minmax\(min\(100%, 300px\), 1fr\)\)/);
+  assert.match(html, /src="img\/custom\/tvgids\/npo_1\.png"/);
+  assert.doesNotMatch(html, /Finished/);
+  assert.match(html, /tvgids-item tvgids-now">.*On air/);
+  assert.match(html, /Next &lt;b&gt;/);
+  assert.doesNotMatch(html, /Later/); // tvgidsmaxitems: 2
+  assert.match(html, /tvgids-error">Unable to fetch the TV guide of rtl_4\./);
+
+  // Finished programmes on request; 0 = the rest of the day.
+  html = tvgids.channelsHtml(
+    { tvgidsshowpast: true, tvgidsmaxitems: 0 },
+    channels.slice(0, 1),
+    now
+  );
+  assert.match(html, /tvgids-item tvgids-past">.*Finished/);
+  assert.match(html, /Later/);
+
+  html = tvgids.channelsHtml(
+    { tvgidshidelogo: true },
+    channels.slice(0, 1),
+    now
+  );
+  assert.doesNotMatch(html, /tvgids-logo/);
+  assert.match(html, /<span class="tvgids-name">NPO 1<\/span>/);
+});
+
+test('TVgids is a repeatable Widgets card with a logo picker in the Device Editor', () => {
+  const editor = fs.readFileSync(path.join(root, 'js/deviceeditor.js'), 'utf8');
+  const widgets = fs.readFileSync(
+    path.join(root, 'js/widgeteditor.js'),
+    'utf8'
+  );
+  const layout = fs.readFileSync(path.join(root, 'js/layouteditor.js'), 'utf8');
+  const dashticz = fs.readFileSync(path.join(root, 'js/dashticz.js'), 'utf8');
+  const save = fs.readFileSync(path.join(root, 'js/saveblocks.php'), 'utf8');
+  const writer = fs.readFileSync(
+    path.join(root, 'js/configwriter.php'),
+    'utf8'
+  );
+
+  assert.match(widgets, /html \+= _tvgidsWidgetCardHtml\(\);/);
+  assert.equal(
+    (widgets.match(/=== 'tvgids'\) \{\s*_openTvgidsFromWidgets\(\);/g) || [])
+      .length,
+    2
+  );
+  assert.match(widgets, /DashticzDeviceEditor\.openTvgids\(\);/);
+  assert.match(editor, /openTvgids: openTvgids,/);
+  assert.match(editor, /tvgids: 'tvgids_',/);
+  assert.match(editor, /kind = 'tvgids';/);
+  assert.match(
+    editor,
+    /if \(isTvgidsBlock\)\s*html \+= _tvgidsFieldsHtml\('de-config', tvgidsValues\);/
+  );
+  assert.match(
+    editor,
+    /if \(isTvgidsBlock\) _wireTvgidsFields\('de-config', \$popup\);/
+  );
+  assert.match(editor, /'tvgids\/channels\.json'/);
+  assert.match(editor, /t\['tvgids_group_' \+ group\.group\]/);
+  assert.match(layout, /kind: 'tvgids',/);
+  assert.match(dashticz, /'f1',\s*'tvgids',/);
+  assert.match(save, /\$kind === 'tvgids'/);
+  assert.match(writer, /\$kind === 'tvgids'/);
+
+  for (const locale of ['en_US', 'nl_NL', 'fr_FR']) {
+    const lang = JSON.parse(
+      fs.readFileSync(path.join(root, `lang/${locale}.json`), 'utf8')
+    );
+    const de = lang.settings.deviceeditor;
+    for (const group of ['algemeen', 'overig', 'regionaal', 'sport', 'films']) {
+      assert.ok(de[`tvgids_group_${group}`], `${locale} tvgids_group_${group}`);
+    }
+    for (const key of [
+      'tvgids_block',
+      'tvgids_block_channels',
+      'invalid_tvgids_block_channels',
+      'tvgids_block_maxitems',
+      'tvgids_block_columnwidth',
+    ]) {
+      assert.ok(de[key], `${locale} ${key}`);
+    }
+    assert.ok(
+      lang.settings.widgeteditor.tvgids_title,
+      `${locale} tvgids_title`
+    );
+    assert.ok(lang.misc.tvgids_error, `${locale} tvgids_error`);
+  }
+});
+
+test('TVgids channel list: five groups, every channel with its own logo', () => {
+  const groups = JSON.parse(
+    fs.readFileSync(
+      path.join(root, 'vendor/dashticz/tvgids/channels.json'),
+      'utf8'
+    )
+  );
+  assert.deepEqual(
+    groups.map((group) => group.group),
+    ['algemeen', 'overig', 'regionaal', 'sport', 'films']
+  );
+  const ids = groups.flatMap((group) => group.channels.map((c) => c.id));
+  assert.equal(new Set(ids).size, ids.length);
+  for (const id of ids) {
+    assert.match(id, /^[a-z0-9_]{1,40}$/);
+    assert.ok(
+      fs.existsSync(path.join(root, `img/custom/tvgids/${id}.png`)),
+      `logo of ${id}`
+    );
+  }
+  // No logos of channels that are not offered.
+  const logos = fs
+    .readdirSync(path.join(root, 'img/custom/tvgids'))
+    .map((file) => file.replace(/\.png$/, ''));
+  assert.deepEqual(logos.sort(), [...ids].sort());
+  // img/custom/.gitignore ignores everything else in img/custom, so the
+  // logos must be excepted explicitly or a commit leaves them out.
+  const ignored = spawnSync(
+    'git',
+    ['check-ignore', '--no-index', 'img/custom/tvgids/npo_1.png'],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.equal(ignored.status, 1, 'img/custom/tvgids/*.png is git-ignored');
+});
+
+function loadFullykioskModule() {
+  const context = {
+    language: { misc: {} },
+    settings: { dashticz_php_path: 'vendor/dashticz/' },
+    Dashticz: { register: () => {} },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/dt_function.js'), 'utf8'),
+    context
+  );
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/components/fullykiosk.js'), 'utf8'),
+    context
+  );
+  return context.DT_fullykiosk;
+}
+
+test('Fully Kiosk block: dispatched on its mode, percentages kept in order', () => {
+  const fully = loadFullykioskModule();
+  assert.equal(fully.canHandle({ fullymode: 'charge' }), true);
+  assert.equal(fully.canHandle({ fullymode: '' }), false);
+  assert.equal(fully.canHandle({ tvgids: 'npo_1' }), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(fully.limits({}))), {
+    startmin: 25,
+    startmax: 30,
+    stopmin: 80,
+    stopmax: 90,
+    hardmin: 15,
+    hardmax: 95,
+  });
+  const swapped = fully.limits({ fullystartmin: 40, fullystartmax: 20 });
+  assert.equal(swapped.startmin, 20);
+  assert.equal(swapped.startmax, 40);
+  // Both ends of a range can be picked, like random.randint.
+  assert.equal(
+    fully.randomBetween(80, 90, () => 0),
+    80
+  );
+  assert.equal(
+    fully.randomBetween(80, 90, () => 0.999999),
+    90
+  );
+});
+
+test('Fully Kiosk charge control follows the domoticz_fullykiosk plugin', () => {
+  const fully = loadFullykioskModule();
+  const lim = fully.limits({});
+  const targets = { start: 27, stop: 85 };
+  const decide = (battery, charger, random) =>
+    JSON.parse(
+      JSON.stringify(
+        fully.decide(battery, charger, targets, lim, random || (() => 0))
+      )
+    );
+
+  // Between the percentages nothing is switched.
+  assert.equal(decide(50, 'Off').command, null);
+  assert.equal(decide(50, 'On').command, null);
+  // Starts at the start percentage and picks both percentages again.
+  let result = decide(27, 'Off');
+  assert.equal(result.command, 'On');
+  assert.deepEqual(result.targets, { start: 25, stop: 80 });
+  // Always starts at the hard minimum, whatever the start percentage.
+  result = decide(15, 'Off');
+  assert.equal(result.command, 'On');
+  // Stops at the stop percentage and only picks a new start percentage.
+  result = decide(85, 'On', () => 0.999999);
+  assert.equal(result.command, 'Off');
+  assert.deepEqual(result.targets, { start: 30, stop: 85 });
+  // Always stops at the hard maximum and when full.
+  assert.equal(decide(95, 'On').command, 'Off');
+  assert.equal(decide(100, 'On').command, 'Off');
+  // A charger that is already in the right state is left alone.
+  assert.equal(decide(10, 'On').command, null);
+  assert.equal(decide(96, 'Off').command, null);
+  // The next switch percentage depends on the state of the charger.
+  assert.equal(fully.nextSwitchPercentage('On', targets), 85);
+  assert.equal(fully.nextSwitchPercentage('Off', targets), 27);
+});
+
+test('Fully Kiosk is a repeatable Widgets card with its own settings table', () => {
+  const editor = fs.readFileSync(path.join(root, 'js/deviceeditor.js'), 'utf8');
+  const widgets = fs.readFileSync(
+    path.join(root, 'js/widgeteditor.js'),
+    'utf8'
+  );
+  const layout = fs.readFileSync(path.join(root, 'js/layouteditor.js'), 'utf8');
+  const dashticz = fs.readFileSync(path.join(root, 'js/dashticz.js'), 'utf8');
+  const save = fs.readFileSync(path.join(root, 'js/saveblocks.php'), 'utf8');
+  const writer = fs.readFileSync(
+    path.join(root, 'js/configwriter.php'),
+    'utf8'
+  );
+
+  assertReferenceBasedKind(layout, 'fullykiosk');
+  assert.match(widgets, /html \+= _fullykioskWidgetCardHtml\(\);/);
+  assert.equal(
+    (
+      widgets.match(
+        /=== 'fullykiosk'\) \{\s*_openFullykioskFromWidgets\(\);/g
+      ) || []
+    ).length,
+    2
+  );
+  assert.match(widgets, /DashticzDeviceEditor\.openFullykiosk\(\);/);
+  assert.match(editor, /openFullykiosk: openFullykiosk,/);
+  assert.match(editor, /fullykiosk: 'fullykiosk_',/);
+  assert.match(editor, /kind = 'fullykiosk';/);
+  assert.match(
+    editor,
+    /if \(isFullyBlock\) html \+= _fullyFieldsHtml\('de-config', fullyValues\);/
+  );
+  assert.match(layout, /kind: 'fullykiosk',/);
+  assert.match(dashticz, /'tvgids',\s*'fullykiosk',/);
+  assert.match(save, /\$kind === 'fullykiosk'/);
+  assert.match(writer, /\$kind === 'fullykiosk'/);
+
+  for (const locale of ['en_US', 'nl_NL', 'fr_FR']) {
+    const lang = JSON.parse(
+      fs.readFileSync(path.join(root, `lang/${locale}.json`), 'utf8')
+    );
+    const de = lang.settings.deviceeditor;
+    for (const key of [
+      'fully_block',
+      'fully_block_host',
+      'fully_block_switch',
+      'fully_block_auto',
+      'fully_block_startmin',
+      'fully_block_stopmax',
+      'invalid_fully_block_host',
+    ]) {
+      assert.ok(de[key], `${locale} ${key}`);
+    }
+    assert.ok(
+      lang.settings.widgeteditor.fullykiosk_title,
+      `${locale} fullykiosk_title`
+    );
+    assert.ok(lang.misc.fullykiosk_battery, `${locale} fullykiosk_battery`);
+  }
+});
+
+test('Fully Kiosk block renders its rows: switches in column 1, data in column 2', () => {
+  let html = '';
+  const classes = {};
+  const chain = {
+    css: () => chain,
+    html: (value) => {
+      html = value;
+      return chain;
+    },
+    find: () => chain,
+    on: () => chain,
+    toggleClass: (name, state) => {
+      classes[name] = state;
+      return chain;
+    },
+  };
+  // Domoticz is a global of the dashboard.
+  const context = {
+    language: { misc: {} },
+    settings: { dashticz_php_path: 'vendor/dashticz/' },
+    Dashticz: { register: () => {} },
+    Domoticz: {
+      getAllDevices: () => ({ 123: { Status: 'Off' } }),
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/dt_function.js'), 'utf8'),
+    context
+  );
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/components/fullykiosk.js'), 'utf8'),
+    context
+  );
+  const me = {
+    key: 'k',
+    block: {
+      fullymode: 'charge',
+      fullyswitch: '123',
+      fullyshowscreen: true,
+      fullyshowcharging: true,
+      fullyshowbrightness: true,
+      fullyshowloadurl: true,
+    },
+    $mountPoint: chain,
+    battery: 49,
+    info: { brightness: 14, plugged: false, screenOn: true },
+    targets: { start: 27, stop: 85 },
+  };
+  context.DT_fullykiosk.render(me);
+  assert.match(html, /fullykiosk-battery/);
+  assert.match(html, /49 %/);
+  assert.match(html, /Charge from.*27 %/);
+  // Every row has the control column and the data column.
+  const rows = html.match(/class="fullykiosk-row /g) || [];
+  // The charger button spans the battery and next switch rows (one group).
+  assert.equal(rows.length, 5);
+  assert.match(html, /fullykiosk-group/);
+  assert.equal((html.match(/class="fullykiosk-control"/g) || []).length, 5);
+  assert.equal((html.match(/class="fullykiosk-data[ "]/g) || []).length, 6);
+  // The charger is a power button in column 1, with no Charging line; the
+  // next switch percentage is the data of that row. No sliders.
+  assert.match(html, /data-action="charger"/);
+  assert.doesNotMatch(html, />Charging</);
+  assert.match(html, /Charge from/);
+  // The brightness is a dimmer slider, without minus and plus buttons.
+  assert.match(html, /type="range" class="fullykiosk-brightness-input"/);
+  assert.doesNotMatch(html, /data-step|fa-minus|fa-plus/);
+  assert.match(html, /data-action="loadurl"/);
+  // The tile icon follows the charger switch (Off here).
+  assert.deepEqual(classes, { on: false, off: true });
+  // The battery row can be switched off.
+  me.block.fullyshowbattery = false;
+  context.DT_fullykiosk.render(me);
+  assert.doesNotMatch(html, /fullykiosk-battery/);
+});
+
+test('LMS and Fully Kiosk share the .dt-btn button style of creative.css', () => {
+  const css = fs.readFileSync(path.join(root, 'css/creative.css'), 'utf8');
+  const lmsCss = fs.readFileSync(
+    path.join(root, 'js/components/lms.css'),
+    'utf8'
+  );
+  const lms = fs.readFileSync(path.join(root, 'js/components/lms.js'), 'utf8');
+  const fully = fs.readFileSync(
+    path.join(root, 'js/components/fullykiosk.js'),
+    'utf8'
+  );
+  assert.match(css, /\n\.dt-btn \{/);
+  assert.match(css, /\n\.dt-btn\.on \{/);
+  // The look lives in one place; lms.css only sets the size.
+  assert.doesNotMatch(lmsCss, /background:/);
+  assert.match(lms, /transbg hover dt-btn lms-btn/);
+  assert.match(fully, /transbg hover dt-btn fullykiosk-btn/);
+  // The Fully Kiosk widget does not depend on LMS.
+  assert.doesNotMatch(fully, /lms\.css|lms-btn/);
+});
+
+function loadWeatherinfoModule(extra) {
+  const context = Object.assign(
+    {
+      language: { misc: {} },
+      settings: { dashticz_php_path: 'vendor/dashticz/' },
+      Dashticz: { register: () => {} },
+      Domoticz: { getAllDevices: () => ({}) },
+    },
+    extra
+  );
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/dt_function.js'), 'utf8'),
+    context
+  );
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'js/components/weatherinfo.js'), 'utf8'),
+    context
+  );
+  return context.DT_weatherinfo;
+}
+
+test('Weather Info rain status follows the domoticz_weatherinfo plugin', () => {
+  const wi = loadWeatherinfoModule();
+  assert.equal(wi.canHandle({ wimode: 'forecast' }), true);
+  assert.equal(wi.canHandle({ wimode: '' }), false);
+  assert.equal(wi.canHandle({ fullymode: 'charge' }), false);
+  // Raw Buienradar value -> mm/h: 0 is dry, 109 is 1 mm/h.
+  assert.equal(wi.rawToMm(0), 0);
+  assert.equal(wi.rawToMm(109), 1);
+  const strip = (html) => html.replace(/<[^>]+>/g, '');
+  const status = (rows, language) =>
+    strip(wi.rainStatus(wi.parseRain(rows), language));
+  // Dry: no rain in the whole forecast.
+  assert.equal(
+    status(
+      [
+        [0, '12:00'],
+        [0, '12:05'],
+      ],
+      'nl'
+    ),
+    'Voorlopig droog'
+  );
+  assert.equal(status([[0, '12:00']], 'en'), 'Dry for now');
+  // Raining now: the first two values decide; a range when it gets heavier.
+  assert.equal(
+    status(
+      [
+        [109, '12:00'],
+        [0, '12:05'],
+      ],
+      'en'
+    ),
+    'Raining now 1.0 mm/h'
+  );
+  assert.equal(
+    status(
+      [
+        [109, '12:00'],
+        [0, '12:05'],
+        [141, '12:10'],
+      ],
+      'nl'
+    ),
+    'Het regent nu 1,0 tot 10,0 mm/u'
+  );
+  // Rain within the next 20 minutes.
+  assert.equal(
+    status(
+      [
+        [0, '12:00'],
+        [0, '12:05'],
+        [109, '12:10'],
+      ],
+      'en'
+    ),
+    'Rain expected 1.0 mm/h'
+  );
+  // Later: the amount and the time of the first rain.
+  assert.equal(
+    status(
+      [
+        [0, '12:00'],
+        [0, '12:05'],
+        [0, '12:10'],
+        [0, '12:15'],
+        [0, '12:20'],
+        [109, '12:25'],
+      ],
+      'en'
+    ),
+    '1.0 mm/h rain expected at 12:25'
+  );
+});
+
+test('Weather Info weather line: wind, icon and text format', () => {
+  const wi = loadWeatherinfoModule();
+  // The compass of the plugin, per language.
+  assert.equal(wi.compass(310, 'nl'), 'NW');
+  assert.equal(wi.compass(100, 'nl'), 'O');
+  assert.equal(wi.compass(100, 'en'), 'E');
+  assert.equal(wi.compass(359, 'en'), 'N');
+  // Buienradar icon letter -> icon, day or night (doubled letter).
+  assert.equal(wi.weatherIcon({ icon: 'a', isDay: true })[0], 'sun');
+  assert.equal(wi.weatherIcon({ icon: 'aa', isDay: false })[0], 'moon');
+  assert.equal(wi.weatherIcon({ icon: 'q' })[0], 'rain_cloud');
+  assert.equal(wi.weatherIcon({ icon: 'zz' })[0], 'cloud');
+  assert.equal(wi.weatherIcon({})[0], 'cloud');
+  // No usable icon: guessed from the Dutch text.
+  assert.equal(wi.weatherIcon({ description: 'Onweersbuien' })[0], 'lightning');
+  assert.equal(wi.weatherIcon({ description: 'Zonnig' })[0], 'sun');
+  // Raining right now (Buienradar): a dry icon becomes a rain cloud, snow and
+  // lightning stay.
+  assert.equal(wi.weatherIcon({ icon: 'c' }, true)[0], 'rain_cloud');
+  assert.equal(
+    wi.weatherIcon({ icon: 'aa', isDay: false }, true)[0],
+    'rain_cloud'
+  );
+  assert.equal(wi.weatherIcon({ icon: 't' }, true)[0], 'snow');
+  assert.equal(wi.weatherIcon({ icon: 'g' }, true)[0], 'lightning');
+  // The description follows: light rain, rain or heavy rain by intensity.
+  const desc = (icon, text, raw, language) =>
+    wi
+      .partsHtml(
+        { weather: { icon, description: text }, rain: [[raw, '12:00']] },
+        { wiparts: 'desc', wilanguage: language }
+      )
+      .replace(/<[^>]+>/g, '');
+  assert.equal(desc('c', 'Bewolkt', 109, 'nl'), 'Lichte regen');
+  assert.equal(desc('c', 'Bewolkt', 130, 'en'), 'Rain');
+  assert.equal(desc('c', 'Bewolkt', 160, 'en'), 'Heavy rain');
+  assert.equal(desc('c', 'Zwaar bewolkt', 0, 'nl'), 'Zwaar bewolkt');
+  assert.equal(desc('c', 'Zwaar bewolkt', 0, 'en'), 'Cloudy');
+  assert.equal(desc('t', 'Sneeuw', 109, 'nl'), 'Sneeuw');
+  assert.match(
+    wi.partsHtml(
+      { weather: { icon: 'c' }, rain: [[109, '12:00']] },
+      { wiparts: 'logo' }
+    ),
+    /class="wi-fall/
+  );
+  assert.doesNotMatch(
+    wi.partsHtml(
+      { weather: { icon: 'c' }, rain: [[0, '12:00']] },
+      { wiparts: 'logo' }
+    ),
+    /class="wi-fall/
+  );
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const res = {
+    weather: {
+      temperature: 19.74,
+      windBft: 4,
+      windDirection: 310,
+      icon: 'c',
+      description: 'Bewolkt',
+      isDay: true,
+    },
+    rain: [[0, '12:00']],
+  };
+  const strip = (html) => html.replace(/<[^>]+>/g, '');
+  const rows = (block) =>
+    wi
+      .partsHtml(res, block)
+      .split('</div>')
+      .filter(Boolean)
+      .map((row) => strip(row));
+  // Default: all parts after each other on one row.
+  assert.deepEqual(plain(wi.partsList({})), [
+    'status',
+    'temp',
+    'desc',
+    'wind',
+    'logo',
+  ]);
+  assert.equal(rows({}).length, 1);
+  assert.match(rows({})[0], /^Voorlopig droog ● 19,7°C ● Bewolkt ● NW4 ● /);
+  assert.match(
+    rows({ wilanguage: 'en' })[0],
+    /^Dry for now ● 19\.7°C ● Cloudy ● NW4 ● /
+  );
+  // Parts can be left out and put in any order; unknown parts are ignored.
+  assert.deepEqual(plain(wi.partsList({ wiparts: 'wind, temp,wind,foo' })), [
+    'wind',
+    'temp',
+  ]);
+  assert.deepEqual(
+    plain(wi.partsList({ wiparts: '' })),
+    plain(wi.partsList({}))
+  );
+  assert.deepEqual(rows({ wiparts: 'status,temp' }), [
+    'Voorlopig droog ● 19,7°C',
+  ]);
+  assert.deepEqual(rows({ wiparts: 'wind,temp' }), ['NW4 ● 19,7°C']);
+  assert.deepEqual(rows({ wiparts: 'temp,status,wind' }), [
+    '19,7°C ● Voorlopig droog ● NW4',
+  ]);
+  // Wind is left out when the direction is not known; no weather = no parts.
+  assert.deepEqual(
+    wi
+      .partsHtml(
+        { weather: { temperature: 3, windBft: 3 } },
+        { wiparts: 'temp,wind' }
+      )
+      .match(/NW|\d+ ●/),
+    null
+  );
+  assert.equal(wi.partsHtml({ weather: null }, { wiparts: 'temp,logo' }), '');
+  // The location: a comma is accepted; nothing set means Domoticz'.
+  assert.equal(wi.parseCoordinate('52,37'), 52.37);
+  assert.equal(wi.parseCoordinate(''), null);
+  assert.equal(wi.parseCoordinate('abc'), null);
+});
+
+test('Weather Info block renders its rows and the optional rainfall row', () => {
+  let html = '';
+  const chain = {
+    css: () => chain,
+    html: (value) => {
+      html = value;
+      return chain;
+    },
+    find: () => chain,
+  };
+  const wi = loadWeatherinfoModule();
+  const me = {
+    block: { wimode: 'forecast', wilanguage: 'en', wishowrainfall: true },
+    $mountPoint: chain,
+  };
+  wi.render(me, {
+    rain: [
+      [109, '12:00'],
+      [0, '12:05'],
+    ],
+    weather: { temperature: 12, icon: 'q', description: 'Regen', isDay: true },
+  });
+  assert.match(html, /weatherinfo-weather[^>]*>Raining now/);
+  assert.match(html, /weatherinfo-weather/);
+  assert.match(html, /weatherinfo-rainfall/);
+  assert.match(html, /1\.0 mm\/h/);
+  me.block.wishowrainfall = false;
+  wi.render(me, { rain: [[0, '12:00']], weather: null, errors: ['Oops'] });
+  assert.doesNotMatch(html, /weatherinfo-rainfall/);
+  assert.match(html, /Dry for now/);
+  assert.match(html, /weatherinfo-error[^>]*>Oops/);
+});
+
+test('Weather Info is a repeatable Widgets card with its own settings table', () => {
+  const editor = fs.readFileSync(path.join(root, 'js/deviceeditor.js'), 'utf8');
+  const widgets = fs.readFileSync(
+    path.join(root, 'js/widgeteditor.js'),
+    'utf8'
+  );
+  const layout = fs.readFileSync(path.join(root, 'js/layouteditor.js'), 'utf8');
+  const dashticz = fs.readFileSync(path.join(root, 'js/dashticz.js'), 'utf8');
+  const save = fs.readFileSync(path.join(root, 'js/saveblocks.php'), 'utf8');
+  const writer = fs.readFileSync(
+    path.join(root, 'js/configwriter.php'),
+    'utf8'
+  );
+
+  assertReferenceBasedKind(layout, 'weatherinfo');
+  assert.match(widgets, /html \+= _weatherinfoWidgetCardHtml\(\);/);
+  assert.equal(
+    (
+      widgets.match(
+        /=== 'weatherinfo'\) \{\s*_openWeatherinfoFromWidgets\(\);/g
+      ) || []
+    ).length,
+    2
+  );
+  assert.match(widgets, /DashticzDeviceEditor\.openWeatherinfo\(\);/);
+  assert.match(editor, /openWeatherinfo: openWeatherinfo,/);
+  assert.match(editor, /weatherinfo: 'weatherinfo_',/);
+  assert.match(editor, /kind = 'weatherinfo';/);
+  assert.match(
+    editor,
+    /html \+= _weatherinfoFieldsHtml\('de-config', weatherinfoValues\);/
+  );
+  assert.match(layout, /kind: 'weatherinfo',/);
+  assert.match(dashticz, /'fullykiosk',\s*'weatherinfo',/);
+  assert.match(save, /\$kind === 'weatherinfo'/);
+  assert.match(writer, /\$kind === 'weatherinfo'/);
+
+  // Every option of the plugin has a setting.
+  for (const key of [
+    'lat',
+    'lon',
+    'pollminutes',
+    'language',
+    'icons',
+    'parts',
+    'showrainfall',
+    'fontsize',
+  ]) {
+    assert.match(editor, new RegExp(`\\{\\s*key: '${key}'`), key);
+  }
+
+  for (const locale of ['en_US', 'nl_NL', 'fr_FR']) {
+    const lang = JSON.parse(
+      fs.readFileSync(path.join(root, `lang/${locale}.json`), 'utf8')
+    );
+    const de = lang.settings.deviceeditor;
+    for (const key of [
+      'weatherinfo_block',
+      'weatherinfo_block_lat',
+      'weatherinfo_block_lon',
+      'weatherinfo_block_pollminutes',
+      'weatherinfo_block_language',
+      'weatherinfo_block_parts',
+      'weatherinfo_block_icons_animated',
+      'weatherinfo_block_part_status',
+      'weatherinfo_block_part_temp',
+      'weatherinfo_block_part_desc',
+      'weatherinfo_block_part_wind',
+      'weatherinfo_block_part_logo',
+      'weatherinfo_block_showrainfall',
+      'weatherinfo_block_fontsize',
+      'invalid_weatherinfo_block_location',
+    ]) {
+      assert.ok(de[key], `${locale} ${key}`);
+    }
+    assert.ok(
+      lang.settings.widgeteditor.weatherinfo_title,
+      `${locale} weatherinfo_title`
+    );
+    for (const key of [
+      'weatherinfo_rainfall',
+      'weatherinfo_nolocation',
+      'weatherinfo_error',
+    ]) {
+      assert.ok(lang.misc[key], `${locale} ${key}`);
+    }
+  }
 });

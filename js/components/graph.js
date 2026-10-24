@@ -1435,7 +1435,7 @@ function createCurrentValues(me) {
                 header[key] = header[key].replace(
                   //custom header element. Fill in the current device value if needed
                   'data.' + device.idx,
-                  'parseFloat("' + device.currentValue + '")'
+                  'parseFloat("' + parseFloat(device.currentValue) + '")'
                 ); //was graph.currentValue
               }
             });
@@ -1964,7 +1964,10 @@ function getYlabels(g) {
         l.push(label);
     }
   });
-  return l;
+  //Chart.js ignores an axis with an empty id, so a device without unit/axis label would not render
+  return l.map(function (lbl) {
+    return isDefined(lbl) && lbl !== '' ? lbl : ' ';
+  });
 }
 
 function groupByDevice(me) {

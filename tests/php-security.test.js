@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const { spawn, spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
@@ -164,6 +165,32 @@ function lmsConnectErrorReason(errno) {
     fs.unlinkSync(funcsFile);
   }
 }
+
+/* cors.php / nocache.php relay untrusted remote bodies. Opened as a page, a
+   remote text/html or image/svg+xml document must not run scripts in the
+   dashboard origin, so the response carries nosniff and a sandbox CSP. */
+test('remote proxy responses are sandboxed and cannot inject headers', () => {
+  const securityPhp = path.join(root, 'vendor/dashticz/security.php');
+  const script = `require '${securityPhp}'; echo json_encode(array(
+    dashticz_remote_response_headers("text/html\r\nX-Evil: 1", "gzip"),
+    dashticz_remote_response_headers("image/png", "gzip"),
+  ));`;
+  const result = spawnSync('php', ['-r', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const [injected, png] = JSON.parse(result.stdout);
+  assert.ok(injected.includes('X-Content-Type-Options: nosniff'));
+  assert.ok(injected.some((h) => /^Content-Security-Policy: sandbox;/.test(h)));
+  assert.ok(!injected.some((h) => /^Content-Type:/.test(h)));
+  assert.ok(!injected.some((h) => /X-Evil/.test(h)));
+  assert.ok(png.includes('Content-Type: image/png'));
+  assert.ok(png.includes('Content-Encoding: gzip'));
+  for (const file of ['cors.php', 'nocache.php']) {
+    assert.match(
+      read('vendor/dashticz/' + file),
+      /dashticz_send_remote_response\(/
+    );
+  }
+});
 
 test('remote proxy endpoints use the validated fetch helper', () => {
   for (const file of [
@@ -706,11 +733,98 @@ test('blocks writer requires CSRF, POST, and generates named block definitions',
      the pattern) only touches this one array. */
   assert.match(
     source,
-    /\$specialBlockKinds = \['dummy', 'title', 'custom', 'group', 'html', 'iframe', 'calendar', 'publictransport', 'timegraph', 'xmltvguide', 'lms', 'camera', 'news', 'graph'\];/
+    /\$specialBlockKinds = dashticz_widget_kinds\('saved'\);/
+  );
+  // The kinds themselves are in js/widgets.json.
+  const manifest = JSON.parse(read('js/widgets.json'));
+  assert.deepEqual(
+    Object.keys(manifest.kinds).filter((kind) => manifest.kinds[kind].saved),
+    [
+      'title',
+      'dummy',
+      'custom',
+      'group',
+      'cluster',
+      'html',
+      'iframe',
+      'calendar',
+      'publictransport',
+      'timegraph',
+      'xmltvguide',
+      'lms',
+      'camera',
+      'news',
+      'graph',
+      'f1',
+      'tvgids',
+      'fullykiosk',
+      'weatherinfo',
+    ].sort(
+      (a, b) =>
+        Object.keys(manifest.kinds).indexOf(a) -
+        Object.keys(manifest.kinds).indexOf(b)
+    )
   );
   assert.match(
     source,
     /in_array\(\$entry\['kind'\], \$specialBlockKinds, true\)/
+  );
+  /* Cluster block: requires a non-empty devices array of positive integer
+     idx values (js/components/cluster.js), same shape as Graph's own
+     requirement, and always writes type: 'cluster' server-side. */
+  assert.match(source, /kind === 'cluster'/);
+  assert.match(source, /A cluster block requires at least one device\./);
+  assert.match(
+    source,
+    /A cluster block requires positive integer device idx values\./
+  );
+  assert.match(writer, /\$kind === 'cluster'/);
+  assert.match(writer, /'type' => 'cluster'/);
+  /* Cluster's optional usage map (switch idx -> companion consumption
+     device idx, js/components/cluster.js): each key must be one of the
+     block's own devices, each value a positive integer idx - otherwise a
+     hand-crafted request could point a row's "consumption" at an arbitrary
+     idx it was never actually given. */
+  assert.match(source, /isset\(\$customFields\['usage'\]\)/);
+  assert.match(
+    source,
+    /A cluster block\\'s usage map key must be one of its own devices\./
+  );
+  assert.match(
+    source,
+    /A cluster block\\'s usage map values must be positive integer device idx values\./
+  );
+  /* Cluster's optional mode field (js/components/cluster.js): switches
+     every row from a toggle to a plain temperature reading. Only
+     'temperature' is a valid value - anything else (including a hand-typed
+     string) is rejected rather than silently ignored. */
+  assert.match(
+    source,
+    /isset\(\$customFields\['mode'\]\) && \$customFields\['mode'\] !== 'temperature'/
+  );
+  /* Cluster's optional titles map (device idx -> custom row name,
+     js/components/cluster.js): same key/value shape as usage above - each
+     key must be one of the block's own devices, each value a non-empty
+     string. */
+  assert.match(source, /isset\(\$customFields\['titles'\]\)/);
+  assert.match(
+    source,
+    /A cluster block\\'s titles map key must be one of its own devices\./
+  );
+  assert.match(
+    source,
+    /A cluster block\\'s titles map values must be non-empty strings\./
+  );
+  /* Cluster's optional switchScale field (js/components/cluster.js sets
+     --cluster-switch-scale from it): must be a number within the same
+     0.3-3 range js/deviceeditor.js's own input already clamps to
+     client-side - a hand-crafted request could otherwise send an
+     arbitrary/non-numeric value straight into a CSS custom property. */
+  assert.match(source, /isset\(\$customFields\['switchScale'\]\)/);
+  assert.match(source, /A cluster block\\'s switchScale must be a number\./);
+  assert.match(
+    source,
+    /A cluster block\\'s switchScale must be between 0\.3 and 3\./
   );
   /* Lyrion Music Server block: server/port/player validated, credentials
      never echoed back in an error message. */
@@ -910,7 +1024,7 @@ test('grid layout writer validates and stores positions without column packing',
   assert.match(source, /configwriter_normalise_grid_position/);
   assert.match(source, /configwriter_build_grid_layout_section/);
   assert.match(source, /configwriter_editor_markers\(\s*'grid-layout'/);
-  assert.match(source, /empty\(\$items\) && !isset\(\$data\['configMode'\]\)/);
+  assert.match(source, /\$data\['deleteScreen'\] === true/);
   assert.match(source, /configwriter_extract_numbered_screens/);
   assert.match(source, /configwriter_remove_numbered_screen_and_compact/);
   assert.match(source, /'removedScreen'\s*=>\s*\$screenNumber/);
@@ -1085,4 +1199,462 @@ test('screens writer can add extra screens with CSRF protection', () => {
   assert.match(writer, /function configwriter_replace_screens_section/);
   assert.match(writer, /function configwriter_emit_new_screen/);
   assert.match(writer, /screens-editor-start/);
+});
+
+/* Runs dashticz_cache_dir() through PHP in a temporary copy of the
+   vendor/dashticz layout: the cache must land in <dashticz>/custom/cache
+   (not vendor/custom/cache, where earlier versions wrote the F1, HP iLO and
+   PostNL caches), the cache root must get a deny-all .htaccess, and the
+   misplaced files of earlier versions must be removed. */
+test('PHP proxy caches live in custom/cache, closed to browsers', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dashticz-cache-'));
+  try {
+    const vendorDir = path.join(tmp, 'vendor', 'dashticz');
+    fs.mkdirSync(vendorDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(root, 'vendor/dashticz/security.php'),
+      path.join(vendorDir, 'security.php')
+    );
+    const oldDir = path.join(tmp, 'vendor', 'custom', 'cache', 'postnl');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'old.json'), '{"refreshToken":"x"}');
+
+    const securityPhp = path
+      .join(vendorDir, 'security.php')
+      .replace(/\\/g, '/');
+    const script = `require '${securityPhp}'; echo json_encode(dashticz_cache_dir('postnl'));`;
+    const result = spawnSync('php', ['-r', script], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+
+    const cacheDir = JSON.parse(result.stdout);
+    assert.equal(
+      path.resolve(cacheDir),
+      path.join(tmp, 'custom', 'cache', 'postnl')
+    );
+    assert.ok(fs.statSync(cacheDir).isDirectory());
+    const htaccess = fs.readFileSync(
+      path.join(tmp, 'custom', 'cache', '.htaccess'),
+      'utf8'
+    );
+    assert.match(htaccess, /Require all denied/);
+    assert.match(htaccess, /Deny from all/);
+    assert.ok(!fs.existsSync(path.join(tmp, 'vendor', 'custom')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('F1, HP iLO, PostNL and XMLTV proxies use the shared cache folder', () => {
+  for (const [file, name] of [
+    ['vendor/dashticz/f1/f1.php', 'f1'],
+    ['vendor/dashticz/hpilo/index.php', 'hpilo'],
+    ['vendor/dashticz/postnl/index.php', 'postnl'],
+    ['vendor/dashticz/xmltv.php', 'xmltv'],
+  ]) {
+    const source = read(file);
+    assert.match(source, new RegExp(`dashticz_cache_dir\\('${name}'\\)`));
+    assert.doesNotMatch(source, /'\/custom\/cache/);
+  }
+  // The PostNL file holds a refresh token: its name must not be derivable
+  // from the e-mail address alone.
+  const postnl = read('vendor/dashticz/postnl/index.php');
+  assert.match(
+    postnl,
+    /hash_hmac\('sha256', strtolower\(\$username\), \(string\) \$password\)/
+  );
+  assert.match(postnl, /dashticz_postnl_cache_file\(\$username, \$password\)/);
+
+  const nginx = read('docker/default.conf');
+  assert.match(nginx, /location \^~ \/custom\/cache\/ \{\s*return 404;/);
+  assert.match(nginx, /location \^~ \/vendor\/custom\/ \{\s*return 404;/);
+});
+
+/* Runs the TVgids bridge's parser (vendor/dashticz/tvgids/tvgids.php)
+   through PHP on a piece of a tvgids24.nl channel page. */
+test('TVgids bridge reads the BroadcastEvent items of a tvgids24.nl page', () => {
+  const page = `
+<li itemscope itemtype="https://schema.org/TelevisionChannel"><a href="zender/npo_1" itemprop="name">NPO 1</a></li>
+<li itemscope itemtype="https://schema.org/BroadcastEvent">
+<meta itemprop="name" content="Tom &amp; Jerry">
+<meta itemprop="startDate" content="2026-10-03T21:35+02:00">
+<meta itemprop="endDate" content="2026-10-03T22:30+02:00">
+<span class="one" itemprop="publishedOn" itemscope itemtype="https://schema.org/BroadcastService">
+<meta itemprop="name" content="NPO 1">
+</span>
+<a class="prog" href="51829622/tom-jerry">Tom &amp; Jerry</a>
+</li>
+<li itemscope itemtype="https://schema.org/BroadcastEvent" class="active">
+<meta itemprop="name" content="Beste Zangers">
+<meta itemprop="startDate" content="2026-10-03T20:30+02:00">
+<meta itemprop="endDate" content="2026-10-03T21:35+02:00">
+<a class="prog" href="51829621/beste-zangers">Beste Zangers</a>
+</li>
+<li itemscope itemtype="https://schema.org/BroadcastEvent">
+<meta itemprop="name" content="Spanje - Tsjechiu00eb">
+<meta itemprop="startDate" content="2026-10-03T22:30+02:00">
+<meta itemprop="endDate" content="2026-10-03T23:00+02:00">
+</li>
+<li itemscope itemtype="https://schema.org/BroadcastEvent">
+<meta itemprop="name" content="No end">
+<meta itemprop="startDate" content="2026-10-03T23:00+02:00">
+</li>`;
+  const dir = path.join(root, 'vendor/dashticz').replace(/\\/g, '/');
+  const script =
+    `require '${dir}/security.php'; require '${dir}/tvgids/tvgids.php';` +
+    ` echo json_encode(array(dashticz_tvgids_parse(stream_get_contents(STDIN)),` +
+    ` count(dashticz_tvgids_channels())));`;
+  const result = spawnSync('php', ['-r', script], {
+    encoding: 'utf8',
+    input: page,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const [programmes, channelCount] = JSON.parse(result.stdout);
+  assert.deepEqual(programmes, [
+    {
+      start: Date.parse('2026-10-03T20:30+02:00') / 1000,
+      end: Date.parse('2026-10-03T21:35+02:00') / 1000,
+      title: 'Beste Zangers',
+      url: 'https://www.tvgids24.nl/51829621/beste-zangers',
+    },
+    {
+      start: Date.parse('2026-10-03T21:35+02:00') / 1000,
+      end: Date.parse('2026-10-03T22:30+02:00') / 1000,
+      title: 'Tom & Jerry',
+      url: 'https://www.tvgids24.nl/51829622/tom-jerry',
+    },
+    {
+      // The site's own broken escape of "Tsjechië" is repaired.
+      start: Date.parse('2026-10-03T22:30+02:00') / 1000,
+      end: Date.parse('2026-10-03T23:00+02:00') / 1000,
+      title: 'Spanje - Tsjechië',
+      url: '',
+    },
+  ]);
+  assert.equal(channelCount, 86);
+});
+
+test('TVgids bridge only fetches known channels from tvgids24.nl, cached', () => {
+  const index = read('vendor/dashticz/tvgids/index.php');
+  const helpers = read('vendor/dashticz/tvgids/tvgids.php');
+  assert.match(index, /dashticz_require_same_origin\(\)/);
+  // Only ids from channels.json reach the URL.
+  assert.match(index, /isset\(\$known\[\$id\]\)/);
+  assert.match(
+    helpers,
+    /dashticz_fetch_remote\('https:\/\/www\.tvgids24\.nl\/zender\/' \. \$id \. '\/vandaag'/
+  );
+  assert.match(helpers, /dashticz_cache_dir\('tvgids'\)/);
+  assert.match(helpers, /dashticz_tvgids_today\(\), 300\)/);
+  assert.doesNotMatch(index + helpers, /shell_exec|exec\(|passthru|system\(/);
+});
+
+/* Runs PHP code that has security.php and the F1 helpers loaded. */
+function runPhp(code) {
+  const dir = path.join(root, 'vendor/dashticz').replace(/\\/g, '/');
+  const result = spawnSync(
+    'php',
+    [
+      '-r',
+      `require '${dir}/security.php'; require '${dir}/f1/f1.php'; ${code}`,
+    ],
+    { encoding: 'utf8' }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+test('F1 bridge parses the sessions of an ICS feed', () => {
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'DTSTART:20260306T043000Z',
+    'DTEND:20260306T053000Z',
+    'SUMMARY:F1: Practice 1 (Australian Grand Prix)',
+    'LOCATION:Melbourne\\, Australia',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART:20260308T040000Z',
+    'SUMMARY:F1: Australian Grand Prix',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+  const events = runPhp(
+    `echo json_encode(dashticz_f1_parse(${JSON.stringify(ics).replace(/\$/g, '\\$')}));`
+  );
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0], {
+    start: Date.parse('2026-03-06T04:30:00Z') / 1000,
+    end: Date.parse('2026-03-06T05:30:00Z') / 1000,
+    session: 'Practice 1',
+    gp: 'Australian Grand Prix',
+    location: 'Melbourne, Australia',
+  });
+  // A session without a "(Grand Prix)" part has no gp and a 2 hour length.
+  assert.equal(events[1].session, 'Australian Grand Prix');
+  assert.equal(events[1].gp, '');
+  assert.equal(events[1].end - events[1].start, 7200);
+});
+
+test('dashticz_cached_json caches, falls back to stale data and remembers failures', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dt-cache-'));
+  try {
+    const file = dir.replace(/\\/g, '/') + '/c.json';
+    const result = runPhp(`
+      $file = '${file}';
+      $calls = 0;
+      $ok = function () use (&$calls) { $calls++; return array('n' => $calls); };
+      $out = array();
+      $out[] = dashticz_cached_json($file, 60, $ok);            // miss: produce
+      $out[] = dashticz_cached_json($file, 60, $ok);            // hit
+      $out[] = dashticz_cached_json($file, 60, $ok, 'other');   // other tag: produce
+      $fail = function () use (&$calls) { $calls++; throw new RuntimeException('down'); };
+      $out[] = dashticz_cached_json($file, 0, $fail, 'other');  // expired, failing: stale
+      $f2 = '${file}2';
+      foreach (array(1, 2) as $i) {
+          try { dashticz_cached_json($f2, 60, $fail, '', 300); }
+          catch (RuntimeException $e) { $out[] = $e->getMessage() . $calls; }
+      }
+      echo json_encode($out);
+    `);
+    assert.deepEqual(result[0], { n: 1 });
+    assert.deepEqual(result[1], { n: 1 });
+    assert.deepEqual(result[2], { n: 2 });
+    assert.deepEqual(result[3], { n: 2 });
+    // Two failing calls, but the producer ran only once (calls: 3 -> 4).
+    assert.deepEqual(result.slice(4), ['down4', 'down4']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('js/widgets.json is read the same way by PHP and by DT_function', () => {
+  const manifest = JSON.parse(read('js/widgets.json'));
+  const dir = path.join(root, 'vendor/dashticz').replace(/\\/g, '/');
+  const php = spawnSync(
+    'php',
+    [
+      '-r',
+      `require '${dir}/security.php'; echo json_encode(array(dashticz_widget_kinds('titleOptional'), dashticz_widget_default_width('tvgids'), dashticz_widget_default_width('f1'), dashticz_widget_default_width('news')));`,
+    ],
+    { encoding: 'utf8' }
+  );
+  assert.equal(php.status, 0, php.stderr);
+  const [titleOptional, tvgidsWidth, f1Width, newsWidth] = JSON.parse(
+    php.stdout
+  );
+  assert.ok(titleOptional.includes('f1') && titleOptional.includes('tvgids'));
+  assert.deepEqual([tvgidsWidth, f1Width, newsWidth], [12, 4, 3]);
+
+  // Same answer from the browser side.
+  const context = {
+    $: { getJSON: () => ({ then: (done) => done(manifest) }) },
+    _DASHTICZ_VERSION: '1',
+  };
+  vm.createContext(context);
+  vm.runInContext(read('js/dt_function.js'), context);
+  context.DT_function.loadWidgetManifest();
+  assert.deepEqual(
+    Array.from(context.DT_function.widgetKinds('titleOptional')),
+    titleOptional
+  );
+  assert.equal(context.DT_function.widgetDefaultWidth('f1'), 4);
+});
+
+test('RWS bridge: same-origin, cached, and used through DT_function.rwsTrafficUrl()', () => {
+  const bridge = read('vendor/dashticz/rws/index.php');
+  assert.match(bridge, /dashticz_require_same_origin\(\)/);
+  assert.match(bridge, /dashticz_cache_dir\('rws'\)/);
+  assert.match(bridge, /dashticz_cached_json\(/);
+  assert.match(
+    bridge,
+    /dashticz_fetch_remote\('https:\/\/api\.rwsverkeersinfo\.nl/
+  );
+
+  const url = (corsPath) => {
+    const context = {
+      $: {},
+      _DASHTICZ_VERSION: '1',
+      settings: { dashticz_php_path: 'vendor/dashticz/' },
+      _CORS_PATH: corsPath,
+    };
+    vm.createContext(context);
+    vm.runInContext(read('js/dt_function.js'), context);
+    return context.DT_function.rwsTrafficUrl();
+  };
+  assert.equal(
+    url('vendor/dashticz/cors.php?'),
+    'vendor/dashticz/rws/index.php'
+  );
+  assert.equal(
+    url('https://proxy.example/'),
+    'https://proxy.example/https://api.rwsverkeersinfo.nl/api/traffic/'
+  );
+});
+
+/* The Fully Kiosk bridge (vendor/dashticz/fullykiosk/fullykiosk.php) keeps the
+   battery level between 0 and 100, like the domoticz_fullykiosk plugin. */
+test('Fully Kiosk bridge summarises the device info and maps the commands of the plugin', () => {
+  const dir = path.join(root, 'vendor/dashticz').replace(/\\/g, '/');
+  const script =
+    `require '${dir}/fullykiosk/fullykiosk.php';` +
+    ` echo json_encode(array(` +
+    `dashticz_fullykiosk_summary(array('batteryLevel' => 54, 'isPlugged' => true, 'screenOn' => false, 'isInScreensaver' => true, 'motionDetectorStarted' => true, 'screenBrightness' => 40)),` +
+    `dashticz_fullykiosk_summary(array('batteryLevel' => 140, 'screenBrightness' => 500)),` +
+    `dashticz_fullykiosk_summary(array('batteryLevel' => 'abc')),` +
+    `dashticz_fullykiosk_command_params('screen', 'off'),` +
+    `dashticz_fullykiosk_command_params('screensaver', 'on'),` +
+    `dashticz_fullykiosk_command_params('motion', 'on'),` +
+    `dashticz_fullykiosk_command_params('brightness', 250)));`;
+  const result = spawnSync('php', ['-r', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    {
+      battery: 54,
+      plugged: true,
+      screenOn: false,
+      screensaver: true,
+      motion: true,
+      brightness: 40,
+    },
+    {
+      battery: 100,
+      plugged: false,
+      screenOn: false,
+      screensaver: false,
+      motion: false,
+      brightness: 100,
+    },
+    {
+      battery: null,
+      plugged: false,
+      screenOn: false,
+      screensaver: false,
+      motion: false,
+      brightness: 0,
+    },
+    { cmd: 'screenOff' },
+    { cmd: 'startScreensaver' },
+    { cmd: 'setConfig', key: 'motionDetectionEnabled', value: 'true' },
+    { cmd: 'setScreenBrightness', value: '100' },
+  ]);
+  const unknown = spawnSync(
+    'php',
+    [
+      '-r',
+      `require '${dir}/fullykiosk/fullykiosk.php'; dashticz_fullykiosk_command_params('reboot', 'on');`,
+    ],
+    { encoding: 'utf8' }
+  );
+  assert.notEqual(unknown.status, 0);
+});
+
+test('Fully Kiosk bridge is same-origin, never cached and keeps the password out of the URL of the page', () => {
+  const source = read('vendor/dashticz/fullykiosk/index.php');
+  assert.match(source, /dashticz_require_same_origin\(\);/);
+  assert.match(source, /Cache-Control: no-store/);
+  assert.match(source, /dashticz_normalize_host_input\(/);
+  assert.match(source, /CURLOPT_FOLLOWLOCATION => false/);
+});
+
+/* The Weather Info bridge (vendor/dashticz/weatherinfo/weatherinfo.php) parses
+   the two Buienradar feeds of the domoticz_weatherinfo plugin. */
+test('Weather Info bridge validates the location and parses both feeds', () => {
+  const dir = path.join(root, 'vendor/dashticz').replace(/\\/g, '/');
+  const rain = '077|12:00\r\n000|12:05\r\nfoo|12:10\r\n255|12:15\r\n';
+  const feed = JSON.stringify({
+    actual: {
+      stationmeasurements: [
+        {
+          stationname: 'Meetstation Schiphol',
+          lat: 52.3,
+          lon: 4.77,
+          iconurl: 'https://x.nl/image/weather-icons/cc.png',
+          weatherdescription: 'Zwaar bewolkt',
+          temperature: 19.7,
+          windspeedBft: 3,
+          winddirectiondegrees: 310,
+        },
+        {
+          stationname: 'Meetstation Zonder',
+          lat: 52.4,
+          lon: 4.8,
+          iconurl: 'https://x.nl/image/weather-icons/bad.png',
+          weatherdescription: 'Bewolkt',
+        },
+        { stationname: 'Geen positie' },
+      ],
+    },
+  });
+  const script =
+    `require '${dir}/weatherinfo/weatherinfo.php';` +
+    ` echo json_encode(array(` +
+    `dashticz_weatherinfo_coordinate('52,3712', -90, 90),` +
+    `dashticz_weatherinfo_coordinate('', -90, 90),` +
+    `dashticz_weatherinfo_coordinate('91', -90, 90),` +
+    `dashticz_weatherinfo_coordinate('abc', -180, 180),` +
+    `dashticz_weatherinfo_parse_rain(${JSON.stringify(rain)}),` +
+    `dashticz_weatherinfo_pick(dashticz_weatherinfo_parse_stations(${JSON.stringify(feed)}), 52.35, 4.78),` +
+    `dashticz_weatherinfo_pick(dashticz_weatherinfo_parse_stations(${JSON.stringify(feed)}), 52.45, 4.8)));`;
+  const result = spawnSync('php', ['-r', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    '52.37',
+    null,
+    null,
+    null,
+    [
+      [77, '12:00'],
+      [0, '12:05'],
+      [255, '12:15'],
+    ],
+    {
+      station: 'Schiphol',
+      distance: 6,
+      icon: 'cc',
+      description: 'Zwaar bewolkt',
+      isDay: false,
+      temperature: 19.7,
+      windBft: 3,
+      windDirection: 310,
+    },
+    {
+      station: 'Zonder',
+      distance: 6,
+      icon: '',
+      description: 'Bewolkt',
+      temperature: 19.7,
+      windBft: 3,
+      windDirection: 310,
+    },
+  ]);
+  for (const bad of [
+    "dashticz_weatherinfo_parse_rain('nothing here')",
+    "dashticz_weatherinfo_parse_stations('{}')",
+    "dashticz_weatherinfo_pick(array(array('name' => 'x', 'lat' => 0, 'lon' => 0, 'icon' => '', 'description' => '')), 52, 5)",
+  ]) {
+    const failed = spawnSync(
+      'php',
+      ['-r', `require '${dir}/weatherinfo/weatherinfo.php'; ${bad};`],
+      { encoding: 'utf8' }
+    );
+    assert.notEqual(failed.status, 0, bad);
+  }
+});
+
+test('Weather Info bridge only downloads the two Buienradar feeds of the plugin', () => {
+  const index = fs.readFileSync(
+    path.join(root, 'vendor/dashticz/weatherinfo/index.php'),
+    'utf8'
+  );
+  const helpers = fs.readFileSync(
+    path.join(root, 'vendor/dashticz/weatherinfo/weatherinfo.php'),
+    'utf8'
+  );
+  assert.match(index, /dashticz_require_same_origin\(\)/);
+  assert.match(helpers, /gpsgadget\.buienradar\.nl\/data\/raintext/);
+  assert.match(helpers, /data\.buienradar\.nl\/2\.0\/feed\/json/);
+  assert.match(helpers, /dashticz_fetch_remote\(/);
+  assert.match(helpers, /dashticz_cached_json\(/);
+  // The request only supplies numbers, never a URL.
+  assert.doesNotMatch(index, /\$input\['url'\]/);
 });

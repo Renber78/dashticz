@@ -1,4 +1,4 @@
-/* global language dashticz_version dashticz_branch newVersion config isNumeric Domoticz*/
+/* global language getAboutTitle config isNumeric Domoticz*/
 var settingList = {};
 settingList.general = {
   title: language.settings.general.title,
@@ -263,11 +263,21 @@ settingList['localize']['timeformat']['title'] =
   language.settings.localize.timeformat;
 settingList['localize']['timeformat']['type'] = 'text';
 
-/* Moved to widget editor (calendar widget settings)
-settingList['localize']['calendarformat'] = ...
-settingList['localize']['calendarlanguage'] = ...
-settingList['localize']['calendarurl'] = ...
-*/
+// Calendar format and language are shared with the Calendar widget config: both
+// read and write config['calendarformat'] / config['calendarlanguage'].
+settingList['localize']['calendarformat'] = {};
+settingList['localize']['calendarformat']['title'] =
+  language.settings.localize.calendarformat;
+settingList['localize']['calendarformat']['type'] = 'text';
+
+settingList['localize']['calendarlanguage'] = {};
+settingList['localize']['calendarlanguage']['title'] =
+  language.settings.localize.calendarlanguage;
+settingList['localize']['calendarlanguage']['type'] = 'select';
+settingList['localize']['calendarlanguage']['options'] = $.extend(
+  {},
+  settingList['localize']['language']['options']
+);
 
 settingList['localize']['speak_lang'] = {};
 settingList['localize']['speak_lang']['title'] =
@@ -541,14 +551,6 @@ var widgetSettingTiles = [
     title: widgetEditorTranslations.calendar_title || 'Calendar',
     icon: 'fas fa-calendar-alt',
     settings: {
-      calendarformat: {
-        title: language.settings.localize.calendarformat,
-        type: 'text',
-      },
-      calendarlanguage: {
-        title: language.settings.localize.calendarlanguage,
-        type: 'text',
-      },
       calendarurl: {
         title:
           language.settings.localize.calendarurl_link || 'Full calendar link',
@@ -832,8 +834,7 @@ settingList['about'] = {};
 settingList['about']['title'] = language.settings.about.title;
 
 settingList['about']['about_text'] = {};
-settingList['about']['about_text']['title'] =
-  'Dashticz V' + dashticz_version + ' ' + dashticz_branch + '<br>' + newVersion;
+settingList['about']['about_text']['title'] = getAboutTitle();
 /*
 settingList['about']['about_text2'] = {};
 settingList['about']['about_text2']['title'] =
@@ -850,7 +851,7 @@ var defaultSettings = {
   language: 'en_US',
   speak_lang: 'en_US',
   timeformat: 'DD-MM-YY HH:mm',
-  calendarformat: 'dd DD.MM HH:mm',
+  calendarformat: 'dd DD-MM HH:mm',
   calendar_maxitems: 15,
   shortdate: 'D MMM',
   longdate: 'D MMMM YYYY',
@@ -1085,6 +1086,14 @@ if (typeof(Storage) !== "undefined") {
 }*/
 
 $.extend(settings, defaultSettings, config);
+
+// The calendar locale follows the general language unless calendarlanguage
+// is explicitly configured.
+if (
+  typeof config === 'undefined' ||
+  typeof config['calendarlanguage'] === 'undefined'
+)
+  settings['calendarlanguage'] = settings['language'];
 
 // When config_mode is not explicitly set in CONFIG.js, default to custom
 // mode (user is editing by hand) rather than wizard.
@@ -1446,6 +1455,8 @@ function renderSettingsCategoryHome() {
     } else if (id === 'theme') {
       html += renderThemeSettingsPanel();
     } else {
+      var twoColumns = id === 'general' || id === 'screen';
+      if (twoColumns) html += '<div class="settings-two-col">';
       for (var s in settingList[id]) {
         if (s !== 'title') {
           // Standby path field is rendered as part of the background picker.
@@ -1459,6 +1470,7 @@ function renderSettingsCategoryHome() {
           html += renderSettingsRow(s, settingList[id][s]);
         }
       }
+      if (twoColumns) html += '</div>';
       if (id === 'standby') {
         html += renderBackgroundPicker(
           'standby_background',
@@ -2221,32 +2233,51 @@ function bindThemeCssVarControls() {
   var $popup = $('#settingspopup');
   if (!$popup.length) return;
 
-  var storedOverrides = _getStoredCssVarOverrides();
-
   // Populate each text input with stored override or computed theme value.
-  $popup.find('.settings-cssvar-input').each(function () {
-    var $input = $(this);
-    var varName = String($input.data('cssvar') || '');
-    if (!varName) return;
-    var value = storedOverrides[varName] || _getComputedCssVar(varName);
-    if (_THEME_PX_VARS.indexOf(varName) !== -1) {
-      value = value.replace(/px\s*$/i, '').trim();
-    }
-    $input.val(value);
-    // Sync swatch if color input is present.
-    var $swatch = $popup.find(
-      '#' + $.escapeSelector($input.attr('id') + '-swatch')
+  // Runs again when the Theme panel opens and when the theme stylesheet has
+  // loaded: the settings dialog can be built before the stylesheet is applied,
+  // which left the fields empty. Fields the user already edited stay as is.
+  function populateThemeCssVarInputs() {
+    var storedOverrides = _getStoredCssVarOverrides();
+    $popup.find('.settings-cssvar-input').each(function () {
+      var $input = $(this);
+      var varName = String($input.data('cssvar') || '');
+      if (!varName) return;
+      var initial = $input.data('initialValue');
+      if (initial !== undefined && $input.val() !== initial) return;
+      var value = storedOverrides[varName] || _getComputedCssVar(varName);
+      if (_THEME_PX_VARS.indexOf(varName) !== -1) {
+        value = value.replace(/px\s*$/i, '').trim();
+      }
+      $input.val(value);
+      // Remember what the panel showed and whether it was a saved override, so
+      // saveSettings only persists values the user actually changed.
+      $input.data('initialValue', value);
+      $input.data('storedOverride', !!storedOverrides[varName]);
+      // Sync swatch if color input is present.
+      var $swatch = $popup.find(
+        '#' + $.escapeSelector($input.attr('id') + '-swatch')
+      );
+      if ($swatch.length) {
+        _syncSwatchFromText($swatch, value);
+      }
+      var $alpha = $popup.find(
+        '#' + $.escapeSelector($input.attr('id') + '-alpha')
+      );
+      if ($alpha.length) {
+        $alpha.val(Math.round(_extractCssAlpha(value) * 100));
+      }
+    });
+  }
+  populateThemeCssVarInputs();
+  $popup
+    .off('click.cssvarpopulate')
+    .on(
+      'click.cssvarpopulate',
+      '.settings-tile[data-settings-category="theme"]',
+      populateThemeCssVarInputs
     );
-    if ($swatch.length) {
-      _syncSwatchFromText($swatch, value);
-    }
-    var $alpha = $popup.find(
-      '#' + $.escapeSelector($input.attr('id') + '-alpha')
-    );
-    if ($alpha.length) {
-      $alpha.val(Math.round(_extractCssAlpha(value) * 100));
-    }
-  });
+  $('link[href^="themes/"]').one('load', populateThemeCssVarInputs);
 
   // Swatch → text input sync.
   $popup
@@ -3051,6 +3082,16 @@ function saveSettings() {
     var varName = $(this).data('cssvar');
     if (varName) {
       var varValue = String($(this).val() || '').trim();
+      // A value that only mirrors the active theme (it was filled in from the
+      // computed style) is not an override. Writing it would pin the theme's
+      // current values into custom.css on every save, which then keep
+      // shadowing the theme after it changes or fails to load.
+      if (
+        !$(this).data('storedOverride') &&
+        varValue === $(this).data('initialValue')
+      ) {
+        return;
+      }
       if (
         varValue !== '' &&
         _THEME_PX_VARS.indexOf(varName) !== -1 &&

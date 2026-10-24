@@ -1,8 +1,12 @@
 /node_modules/
 /docs/_build
-Makefile.ini
 /custom/*
+!/custom/CONFIG_DEFAULT.js
+!/custom/custom.DEFAULT.js
+!/custom/sample-radio_playlist.m3u
 /custom_2/*
+# Cache folder written by mistake by earlier versions of some PHP proxies.
+/vendor/custom/
 
 # Local environment files
 .env
@@ -10,7 +14,6 @@ Makefile.ini
 !.env.example
 
 # Playwright
-node_modules/
 /test-results/
 /playwright-report/
 /blob-report/

@@ -37,7 +37,14 @@ var Dashticz = (function () {
     'weather',
     'simpleblock',
     'map',
+    'postnl',
+    'hpilo',
+    'f1',
+    'tvgids',
+    'fullykiosk',
+    'weatherinfo',
     'group',
+    'cluster',
     'waqi',
     'lms',
   ];
@@ -296,6 +303,10 @@ var Dashticz = (function () {
     me.$mountPoint.toggleClass(
       'dt-hide-title',
       !!(me.block && me.block.hide_title)
+    );
+    me.$mountPoint.toggleClass(
+      'dt-icon-reverse',
+      !!(me.block && me.block.reverseicon === true)
     );
   }
 

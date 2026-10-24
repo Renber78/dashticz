@@ -32,6 +32,17 @@ function _validate_custom_device_value($value, $depth = 0)
     return true;
 }
 
+/** Last update as sent by the editor: true/false, or null when the editor
+ * left it out because the block has no last_update of its own and the user
+ * did not change it - it then keeps following the global
+ * settings['last_update'] (see configwriter.php). */
+function _dashticz_editor_last_update($entry)
+{
+    return is_array($entry) && array_key_exists('last_update', $entry)
+        ? !empty($entry['last_update'])
+        : null;
+}
+
 /** The Device Editor's Dial checkbox is the only supported way to set a
  * block's type; 'type' itself stays a reserved/rejected custom field. */
 function _dashticz_editor_block_type($entry)
@@ -55,12 +66,23 @@ function _normalise_custom_device_fields($entry)
         'text_alignment', 'text_align', 'custom_fields',
         '__proto__', 'prototype', 'constructor',
     ];
+    if (isset($entry['kind']) && $entry['kind'] === 'slidebutton') {
+        // The target screen and the button key are validated for the block itself.
+        $protectedFields = array_merge($protectedFields, ['slide', 'button_key']);
+    }
+    if (isset($entry['kind']) && $entry['kind'] === 'lms') {
+        // These are validated for the LMS block itself.
+        $protectedFields = array_merge(
+            $protectedFields,
+            ['server', 'port', 'username', 'password', 'player', 'refresh']
+        );
+    }
     $customFields = [];
     $seen = [];
     foreach ($entry['custom_fields'] as $field => $value) {
         $fieldKey = is_string($field) ? strtolower($field) : '';
         if (!is_string($field)
-            || !preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/', $field)
+            || !preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/D', $field)
             || in_array($fieldKey, $protectedFields, true)
             || stripos($field, '_dashticz') === 0
         ) {
@@ -90,9 +112,9 @@ function _normalise_custom_device_fields($entry)
    configwriter.php's matching per-kind $props branch. 'slidebutton' is
    checked separately below (its own key pattern differs from every
    other kind here). */
-$specialBlockKinds = ['dummy', 'title', 'custom', 'group', 'html', 'iframe', 'calendar', 'publictransport', 'timegraph', 'xmltvguide', 'lms', 'camera', 'news', 'graph'];
+$specialBlockKinds = dashticz_widget_kinds('saved');
 // Kinds whose title is optional (blank is fine) rather than required.
-$titleOptionalBlockKinds = ['custom', 'slidebutton', 'group', 'html', 'iframe', 'calendar', 'publictransport', 'timegraph', 'xmltvguide', 'lms', 'camera', 'news', 'graph'];
+$titleOptionalBlockKinds = array_merge(dashticz_widget_kinds('titleOptional'), ['slidebutton']);
 
 dashticz_require_same_origin();
 dashticz_require_csrf();
@@ -117,6 +139,32 @@ if (!is_array($data['devices'])) {
 
 $devices = [];
 foreach ($data['devices'] as $entry) {
+    if (is_array($entry)
+        && isset($entry['ref'])
+        && !isset($entry['kind'])
+        && !isset($entry['idx'])
+    ) {
+        /* Reference only: the classic Layout Editor moves or resizes a block
+         * that is already defined in CONFIG.js. Its definition stays exactly
+         * as it is; only its place in the layout changes. */
+        if (!is_string($entry['ref'])
+            || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $entry['ref'])
+        ) {
+            dashticz_json_error(400, 'Invalid block reference.');
+        }
+        $refWidth = isset($entry['width']) ? (int)$entry['width'] : 3;
+        $refHeight = null;
+        if (array_key_exists('height', $entry) && $entry['height'] !== null && $entry['height'] !== '') {
+            $refHeight = max(50, min(2000, (int)(round((int)$entry['height'] / 10) * 10)));
+        }
+        $devices[] = [
+            'isRef' => true,
+            'key' => $entry['ref'],
+            'width' => max(1, min(12, $refWidth)),
+            'height' => $refHeight,
+        ];
+        continue;
+    }
     $customFields = _normalise_custom_device_fields($entry);
     if (is_array($entry)
         && isset($entry['kind'])
@@ -129,13 +177,17 @@ foreach ($data['devices'] as $entry) {
          selected from the normal Domoticz device list. Keep their explicit key. */
         $kind = $entry['kind'];
         if ($kind === 'dummy') {
-            $keyPattern = '/^dummyblock_\d+$/';
+            $keyPattern = '/^dummyblock_\d+$/D';
         } elseif ($kind === 'title') {
             // Existing hand-written blocktitle keys remain editable; new
             // separators still use the editor-generated Title_N convention.
-            $keyPattern = '/^[A-Za-z_$][A-Za-z0-9_$]*$/';
+            // Same pattern as savelayout.php and savegridlayout.php: a key they
+            // would refuse must fail here, before anything is written.
+            $keyPattern = '/^[A-Za-z_][A-Za-z0-9_]*$/D';
         } else {
-            $keyPattern = '/^[A-Za-z_$][A-Za-z0-9_$]*$/';
+            // Same pattern as savelayout.php and savegridlayout.php: a key they
+            // would refuse must fail here, before anything is written.
+            $keyPattern = '/^[A-Za-z_][A-Za-z0-9_]*$/D';
         }
         if (!isset($entry['key'])
             || !is_string($entry['key'])
@@ -144,22 +196,13 @@ foreach ($data['devices'] as $entry) {
             dashticz_json_error(400, 'Invalid special block key.');
         }
         $title = isset($entry['title']) && is_string($entry['title'])
-            ? substr(trim($entry['title']), 0, 100)
+            ? configwriter_cut_bytes(trim($entry['title']), 100)
             : '';
         if ($title === '' && !in_array($kind, $titleOptionalBlockKinds, true)) {
             dashticz_json_error(400, 'A special block title is required.');
         }
-        $defaultWidth = 3;
-        if ($kind === 'title' || $kind === 'slidebutton') {
-            $defaultWidth = 12;
-        } elseif ($kind === 'lms' || $kind === 'iframe' || $kind === 'calendar' || $kind === 'timegraph' || $kind === 'xmltvguide' || $kind === 'graph') {
-            // Cover (100x100) + artist/title/album (lms), an embedded page
-            // (iframe), an agenda/calendar table (calendar), a chart
-            // (timegraph, graph), or a programme guide (xmltvguide), needs
-            // more room than the generic 3-column default other special
-            // blocks start at.
-            $defaultWidth = 6;
-        }
+        // The default width of a kind is in js/widgets.json.
+        $defaultWidth = dashticz_widget_default_width($kind);
         $width = isset($entry['width']) ? (int)$entry['width'] : $defaultWidth;
         $width = max(1, min(12, $width));
         $height = $kind === 'title' ? 120 : null;
@@ -175,52 +218,58 @@ foreach ($data['devices'] as $entry) {
         if ($kind === 'dummy' || $kind === 'custom') {
             // A Custom device may also reference a Domoticz user variable via
             // a 'v<idx>' string (see js/domoticz-api.js's _setAllVariables()
-            // and docs/blocks/domoticzblocks.rst) - a Dummy device has no
+            // and docs/blocks/domoticzblocks.rst), one sub-device of a
+            // multi-value device via '<idx>_<subidx>' (e.g. '274_1', #1309)
+            // or a Domoticz group/scene via 's<idx>' - a Dummy device has no
             // Domoticz backing, so it stays a plain positive integer.
-            $isVariableIdx = $kind === 'custom'
+            $isStringIdx = $kind === 'custom'
                 && isset($entry['idx'])
                 && is_string($entry['idx'])
-                && preg_match('/^v\d+$/', $entry['idx']);
+                && preg_match('/^(?:v\d+|s[1-9]\d*|[1-9]\d*_[1-9]\d*)$/', $entry['idx']);
             if (
-                !$isVariableIdx
+                !$isStringIdx
                 && (!isset($entry['idx']) || !is_int($entry['idx']) || $entry['idx'] < 1)
             ) {
                 dashticz_json_error(
                     400,
                     $kind === 'dummy'
                         ? 'A dummy block requires a positive integer idx.'
-                        : 'A custom device requires a positive integer idx or a v<idx> variable reference.'
+                        : 'A custom device requires a positive integer idx, a v<idx> variable, an s<idx> group/scene or an <idx>_<subidx> sub-device reference.'
                 );
             }
             $idx = $entry['idx'];
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr($entry['icon'], 0, 100)
+                ? configwriter_cut_bytes($entry['icon'], 100)
                 : null;
             $hideData = !empty($entry['hide_data']);
-            $lastUpdate = !empty($entry['last_update']);
+            $lastUpdate = _dashticz_editor_last_update($entry);
             $switch = !empty($entry['switch']);
             $type = _dashticz_editor_block_type($entry);
         } elseif ($kind === 'title') {
             // A separator/title bar has no data value or idx, but it can still
             // show a leading icon like any other block.
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr($entry['icon'], 0, 100)
+                ? configwriter_cut_bytes($entry['icon'], 100)
                 : null;
-        } elseif ($kind === 'group' || $kind === 'html' || $kind === 'iframe' || $kind === 'calendar' || $kind === 'publictransport' || $kind === 'xmltvguide' || $kind === 'camera' || $kind === 'news' || $kind === 'graph') {
-            // Only Icon and Last update apply to these nine (no Data/Switch/
+        } elseif (in_array($kind, dashticz_widget_kinds('simpleIconPayload'), true)) {
+            // Only Icon and Last update apply to these twelve (no Data/Switch/
             // Dial - see js/deviceeditor.js's _quickOptionsHtml()).
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr($entry['icon'], 0, 100)
+                ? configwriter_cut_bytes($entry['icon'], 100)
                 : null;
-            $lastUpdate = !empty($entry['last_update']);
+            $lastUpdate = _dashticz_editor_last_update($entry);
             if ($kind === 'group') {
                 // A Group's idx (the Domoticz group/scene whose devices are
                 // grouped) is optional - custom_fields.devices below can list
-                // plain device ids instead. When given it must still be a
-                // positive integer, same as every other idx in this file.
+                // plain device ids instead. When given it must be a positive
+                // integer or the documented 's<idx>' form (docs/blocks/specials/
+                // group.rst), which is kept as written: elsewhere a bare number
+                // means a device idx.
                 if (isset($entry['idx']) && $entry['idx'] !== null && $entry['idx'] !== '') {
-                    if (!is_int($entry['idx']) || $entry['idx'] < 1) {
-                        dashticz_json_error(400, 'A group idx must be a positive integer.');
+                    $isSceneIdx = is_string($entry['idx'])
+                        && preg_match('/^s[1-9]\d*$/', $entry['idx']);
+                    if (!$isSceneIdx && (!is_int($entry['idx']) || $entry['idx'] < 1)) {
+                        dashticz_json_error(400, 'A group idx must be a positive integer or s<idx>.');
                     }
                     $idx = $entry['idx'];
                 }
@@ -259,13 +308,45 @@ foreach ($data['devices'] as $entry) {
                 // icalurl is otherwise just another custom field (see
                 // _normalise_custom_device_fields() above), but this block
                 // renders nothing at all without one, so it is required here -
-                // same reasoning as html's htmlfile requirement above.
-                if (
-                    !isset($customFields['icalurl'])
-                    || !is_string($customFields['icalurl'])
-                    || trim($customFields['icalurl']) === ''
-                    || strlen($customFields['icalurl']) > 2048
-                ) {
+                // same reasoning as html's htmlfile requirement above. A
+                // single calendar keeps icalurl as a plain URL string
+                // (unchanged); the quick-add popup's "+" button
+                // (js/deviceeditor.js) turns it into a name -> {ics, color}
+                // object once a second calendar is added - same shape and
+                // validation as the Widgets catalog's own multi-source
+                // 'calendar' widget (js/savewidgets.php), reused here.
+                $icalurl = isset($customFields['icalurl']) ? $customFields['icalurl'] : null;
+                if (is_string($icalurl)) {
+                    if (trim($icalurl) === '' || strlen($icalurl) > 2048) {
+                        dashticz_json_error(400, 'Enter a valid calendar (ICS) URL.');
+                    }
+                } elseif (is_array($icalurl) && count($icalurl) > 0 && count($icalurl) <= 20) {
+                    foreach ($icalurl as $calName => $source) {
+                        // json_decode() turns a name like "1" into an integer key.
+                        $calName = (string)$calName;
+                        if ($calName === '' || strlen($calName) > 100 ||
+                            preg_match('/[\x00-\x1F]/', $calName) ||
+                            in_array(strtolower($calName), ['__proto__', 'prototype', 'constructor'], true)) {
+                            dashticz_json_error(400, 'Each calendar requires a valid unique name.');
+                        }
+                        if (!is_array($source)) {
+                            dashticz_json_error(400, 'Each calendar requires valid settings.');
+                        }
+                        $ics = isset($source['ics']) && is_string($source['ics'])
+                            ? trim($source['ics'])
+                            : '';
+                        if ($ics === '' || strlen($ics) > 2048 || !preg_match('#^(?:https?|webcal)://[^\s]+$#i', $ics)) {
+                            dashticz_json_error(400, 'Calendar ' . $calName . ' requires a valid http(s) ICS URL.');
+                        }
+                        $color = isset($source['color']) && is_string($source['color'])
+                            ? trim($source['color'])
+                            : 'white';
+                        if ($color === '' || strlen($color) > 64 ||
+                            !preg_match('/^(?:#[0-9A-Fa-f]{3,8}|[A-Za-z][A-Za-z0-9-]{0,31}|rgba?\([0-9.,%\s]+\)|hsla?\([0-9.,%\s]+\))$/', $color)) {
+                            dashticz_json_error(400, 'Calendar ' . $calName . ' requires a valid color.');
+                        }
+                    }
+                } else {
                     dashticz_json_error(400, 'Enter a valid calendar (ICS) URL.');
                 }
             } elseif ($kind === 'publictransport') {
@@ -324,6 +405,70 @@ foreach ($data['devices'] as $entry) {
                 ) {
                     dashticz_json_error(400, 'Enter a valid news feed URL.');
                 }
+            } elseif ($kind === 'f1') {
+                // f1mode is otherwise just another custom field (see
+                // _normalise_custom_device_fields() above), but
+                // js/components/f1.js dispatches on it, so it is required
+                // here. The URLs are fetched server-side by
+                // vendor/dashticz/f1/index.php, which only accepts public
+                // https addresses; reject anything else already here.
+                if (!isset($customFields['f1mode']) || !in_array($customFields['f1mode'], ['next', 'all'], true)) {
+                    dashticz_json_error(400, 'An F1 block requires a mode.');
+                }
+                foreach (['f1urlen', 'f1urlnl'] as $f1UrlField) {
+                    if (isset($customFields[$f1UrlField])
+                        && (!is_string($customFields[$f1UrlField])
+                            || !preg_match('#^https://\S+$#i', $customFields[$f1UrlField])
+                            || strlen($customFields[$f1UrlField]) > 2048)) {
+                        dashticz_json_error(400, 'Enter a valid F1 calendar URL.');
+                    }
+                }
+            } elseif ($kind === 'fullykiosk') {
+                // fullymode is otherwise just another custom field, but
+                // js/components/fullykiosk.js dispatches on it, so it is
+                // required here. The host is only used by
+                // vendor/dashticz/fullykiosk/index.php; reject anything that
+                // is not a plain host name or address already here.
+                if (!isset($customFields['fullymode']) || $customFields['fullymode'] !== 'charge') {
+                    dashticz_json_error(400, 'A Fully Kiosk block requires a mode.');
+                }
+                if (isset($customFields['fullyhost'])
+                    && (!is_string($customFields['fullyhost'])
+                        || ($customFields['fullyhost'] !== ''
+                            && !preg_match('/^[A-Za-z0-9.\-_:\[\]]{1,253}$/', dashticz_normalize_host_input($customFields['fullyhost']))))) {
+                    dashticz_json_error(400, 'Enter a valid host for the Fully Kiosk tablet.');
+                }
+                if (isset($customFields['fullyswitch'])
+                    && !preg_match('/^\d{1,9}$/', (string) $customFields['fullyswitch'])) {
+                    dashticz_json_error(400, 'Choose a valid Domoticz switch for the Fully Kiosk charger.');
+                }
+            } elseif ($kind === 'weatherinfo') {
+                // wimode is otherwise just another custom field, but
+                // js/components/weatherinfo.js dispatches on it, so it is
+                // required here. The location is only used for Buienradar, by
+                // vendor/dashticz/weatherinfo/index.php, so it
+                // must be empty or a number within range.
+                if (!isset($customFields['wimode']) || $customFields['wimode'] !== 'forecast') {
+                    dashticz_json_error(400, 'A Weather Info block requires a mode.');
+                }
+                foreach (array('wilat' => 90, 'wilon' => 180) as $wiField => $wiLimit) {
+                    if (isset($customFields[$wiField])
+                        && $customFields[$wiField] !== ''
+                        && (!is_numeric($customFields[$wiField]) || abs((float) $customFields[$wiField]) > $wiLimit)) {
+                        dashticz_json_error(400, 'Enter a valid latitude and longitude for the Weather Info block.');
+                    }
+                }
+            } elseif ($kind === 'tvgids') {
+                // tvgids (the channel list) is otherwise just another custom
+                // field, but js/components/tvgids.js dispatches on it, so it
+                // is required here: channel ids as in
+                // vendor/dashticz/tvgids/channels.json, comma separated.
+                if (!isset($customFields['tvgids'])
+                    || !is_string($customFields['tvgids'])
+                    || !preg_match('/^[a-z0-9_]{1,40}(,[a-z0-9_]{1,40}){0,49}$/', $customFields['tvgids'])
+                ) {
+                    dashticz_json_error(400, 'Choose the TV channels of the TVgids block.');
+                }
             } elseif ($kind === 'graph') {
                 // devices is otherwise just another custom field (see
                 // _normalise_custom_device_fields() above), but this block
@@ -340,6 +485,126 @@ foreach ($data['devices'] as $entry) {
                         dashticz_json_error(400, 'A graph block requires positive integer device idx values.');
                     }
                 }
+            } elseif ($kind === 'cluster') {
+                // devices is otherwise just another custom field (see
+                // _normalise_custom_device_fields() above), but this block
+                // (js/components/cluster.js) renders nothing at all without
+                // a non-empty devices array - same requirement as graph's
+                // above, and the same reasoning as html's htmlfile
+                // requirement further up. Every entry must be a positive
+                // integer Domoticz device idx.
+                $clusterDevices = isset($customFields['devices']) ? $customFields['devices'] : null;
+                if (!is_array($clusterDevices) || count($clusterDevices) === 0) {
+                    dashticz_json_error(400, 'A cluster block requires at least one device.');
+                }
+                foreach ($clusterDevices as $clusterDeviceIdx) {
+                    if (!is_int($clusterDeviceIdx) || $clusterDeviceIdx < 1) {
+                        dashticz_json_error(400, 'A cluster block requires positive integer device idx values.');
+                    }
+                }
+                // usage (optional): maps a switch's own idx to a companion
+                // consumption device's idx (js/components/cluster.js reads
+                // it to show that device's wattage next to the row). Each
+                // key must be one of this block's own devices, and each
+                // value a positive integer idx.
+                if (isset($customFields['usage'])) {
+                    $clusterUsage = $customFields['usage'];
+                    if (is_object($clusterUsage)) {
+                        $clusterUsage = get_object_vars($clusterUsage);
+                    }
+                    if (!is_array($clusterUsage)) {
+                        dashticz_json_error(400, 'A cluster block\'s usage map must be an object.');
+                    }
+                    $clusterDeviceIdxSet = array_flip(array_map('strval', $clusterDevices));
+                    foreach ($clusterUsage as $clusterUsageKey => $clusterUsageIdx) {
+                        if (!isset($clusterDeviceIdxSet[(string)$clusterUsageKey])) {
+                            dashticz_json_error(400, 'A cluster block\'s usage map key must be one of its own devices.');
+                        }
+                        if (!is_int($clusterUsageIdx) || $clusterUsageIdx < 1) {
+                            dashticz_json_error(400, 'A cluster block\'s usage map values must be positive integer device idx values.');
+                        }
+                    }
+                }
+                // mode (optional): 'temperature' switches every row from a
+                // toggle to a plain .Temp reading, 'other' to the device's
+                // own Data value (js/components/cluster.js); absent means
+                // the default switch rows. The only values
+                // js/deviceeditor.js's Cluster popups ever send.
+                if (isset($customFields['mode']) && $customFields['mode'] !== 'temperature' && $customFields['mode'] !== 'other') {
+                    dashticz_json_error(400, 'A cluster block\'s mode must be \'temperature\' or \'other\' if set.');
+                }
+                // titles (optional): overrides a row's displayed name
+                // (js/components/cluster.js falls back to the device's own
+                // Name when absent). Same shape/reasoning as usage above -
+                // each key must be one of this block's own devices, each
+                // value a non-empty string.
+                if (isset($customFields['titles'])) {
+                    $clusterTitles = $customFields['titles'];
+                    if (is_object($clusterTitles)) {
+                        $clusterTitles = get_object_vars($clusterTitles);
+                    }
+                    if (!is_array($clusterTitles)) {
+                        dashticz_json_error(400, 'A cluster block\'s titles map must be an object.');
+                    }
+                    $clusterDeviceIdxSet = array_flip(array_map('strval', $clusterDevices));
+                    foreach ($clusterTitles as $clusterTitleKey => $clusterTitleValue) {
+                        if (!isset($clusterDeviceIdxSet[(string)$clusterTitleKey])) {
+                            dashticz_json_error(400, 'A cluster block\'s titles map key must be one of its own devices.');
+                        }
+                        if (!is_string($clusterTitleValue) || $clusterTitleValue === '') {
+                            dashticz_json_error(400, 'A cluster block\'s titles map values must be non-empty strings.');
+                        }
+                    }
+                }
+                // switchScale (optional): resizes the switch toggle
+                // (js/components/cluster.js sets --cluster-switch-scale
+                // from it, read by css/creative.css's .cluster-row-switch).
+                // Absent means the default size; js/deviceeditor.js's own
+                // input already clamps to this same 0.3-3 range, but that's
+                // client-side only.
+                if (isset($customFields['switchScale'])) {
+                    $clusterSwitchScale = $customFields['switchScale'];
+                    if (!is_int($clusterSwitchScale) && !is_float($clusterSwitchScale)) {
+                        dashticz_json_error(400, 'A cluster block\'s switchScale must be a number.');
+                    }
+                    if ($clusterSwitchScale < 0.3 || $clusterSwitchScale > 3) {
+                        dashticz_json_error(400, 'A cluster block\'s switchScale must be between 0.3 and 3.');
+                    }
+                }
+                // icons (optional): per-row icon shown in front of the name
+                // (js/components/cluster.js). Same shape as titles: a map
+                // from one of the cluster's own device idx values to 'auto'
+                // or a Font Awesome class string.
+                if (isset($customFields['icons'])) {
+                    $clusterIcons = $customFields['icons'];
+                    if (is_object($clusterIcons)) {
+                        $clusterIcons = get_object_vars($clusterIcons);
+                    }
+                    if (!is_array($clusterIcons)) {
+                        dashticz_json_error(400, 'A cluster block\'s icons map must be an object.');
+                    }
+                    $clusterDeviceIdxSet = array_flip(array_map('strval', $clusterDevices));
+                    foreach ($clusterIcons as $clusterIconKey => $clusterIconValue) {
+                        if (!isset($clusterDeviceIdxSet[(string)$clusterIconKey])) {
+                            dashticz_json_error(400, 'A cluster block\'s icons map key must be one of its own devices.');
+                        }
+                        if (!is_string($clusterIconValue) || !preg_match('/^[A-Za-z0-9 _-]{1,60}$/', $clusterIconValue)) {
+                            dashticz_json_error(400, 'A cluster block\'s icons map values must be Font Awesome class names.');
+                        }
+                    }
+                }
+                // fontSize (optional): font size of the whole cluster in pixels
+                // (js/components/cluster.js sets --font-device-title from it).
+                // Absent means the default size.
+                if (isset($customFields['fontSize'])) {
+                    $clusterFontSize = $customFields['fontSize'];
+                    if (!is_int($clusterFontSize)) {
+                        dashticz_json_error(400, 'A cluster block\'s fontSize must be a whole number.');
+                    }
+                    if ($clusterFontSize < 8 || $clusterFontSize > 60) {
+                        dashticz_json_error(400, 'A cluster block\'s fontSize must be between 8 and 60.');
+                    }
+                }
             }
         } elseif ($kind === 'timegraph') {
             // Only Icon and Last update apply (no Data/Switch/Dial - see
@@ -352,15 +617,15 @@ foreach ($data['devices'] as $entry) {
             }
             $idx = $entry['idx'];
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr($entry['icon'], 0, 100)
+                ? configwriter_cut_bytes($entry['icon'], 100)
                 : null;
-            $lastUpdate = !empty($entry['last_update']);
+            $lastUpdate = _dashticz_editor_last_update($entry);
         } elseif ($kind === 'lms') {
             // Icon defaults off (js/deviceeditor.js's Lyrion Music Server popup
             // uses the cover artwork as its visual, like an HTML Block), but is
             // still available like every other special block.
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr($entry['icon'], 0, 100)
+                ? configwriter_cut_bytes($entry['icon'], 100)
                 : null;
         }
         $lmsServer = null;
@@ -388,10 +653,10 @@ foreach ($data['devices'] as $entry) {
                 dashticz_json_error(400, 'Enter a valid Lyrion Music Server port.');
             }
             $lmsUsername = isset($entry['username']) && is_string($entry['username'])
-                ? substr($entry['username'], 0, 100)
+                ? configwriter_cut_bytes($entry['username'], 100)
                 : '';
             $lmsPassword = isset($entry['password']) && is_string($entry['password'])
-                ? substr($entry['password'], 0, 200)
+                ? configwriter_cut_bytes($entry['password'], 200)
                 : '';
             $lmsPlayer = isset($entry['player']) && is_string($entry['player'])
                 ? trim($entry['player'])
@@ -434,13 +699,13 @@ foreach ($data['devices'] as $entry) {
                 dashticz_json_error(400, 'A slide button requires a positive target screen number.');
             }
             $buttonKey = isset($entry['button_key']) && is_string($entry['button_key'])
-                ? substr(trim($entry['button_key']), 0, 100)
+                ? configwriter_cut_bytes(trim($entry['button_key']), 100)
                 : '';
             if ($buttonKey === '') {
                 $buttonKey = $title !== '' ? $title : $entry['key'];
             }
             $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-                ? substr(trim($entry['icon']), 0, 100)
+                ? configwriter_cut_bytes(trim($entry['icon']), 100)
                 : null;
         }
         $devices[] = [
@@ -490,7 +755,7 @@ foreach ($data['devices'] as $entry) {
         && isset($entry['idx']) && is_int($entry['idx']) && $entry['idx'] > 0
     ) {
         $name = (isset($entry['name']) && is_string($entry['name']))
-            ? substr(trim($entry['name']), 0, 100)
+            ? configwriter_cut_bytes(trim($entry['name']), 100)
             : 'Device ' . $entry['idx'];
         if ($name === '') {
             $name = 'Device ' . $entry['idx'];
@@ -522,9 +787,9 @@ foreach ($data['devices'] as $entry) {
             }
         }
         $title = isset($entry['title']) && is_string($entry['title'])
-            ? substr(trim($entry['title']), 0, 100) : '';
+            ? configwriter_cut_bytes(trim($entry['title']), 100) : '';
         $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-            ? substr($entry['icon'], 0, 100) : null;
+            ? configwriter_cut_bytes($entry['icon'], 100) : null;
         $devices[] = [
             'idx' => $entry['idx'],
             'isGroup' => false,
@@ -535,14 +800,14 @@ foreach ($data['devices'] as $entry) {
             'title' => $title,
             'icon' => $icon,
             'hide_data' => !empty($entry['hide_data']),
-            'last_update' => !empty($entry['last_update']),
+            'last_update' => _dashticz_editor_last_update($entry),
             'switch' => !empty($entry['switch']),
             'type' => _dashticz_editor_block_type($entry),
             'hide_title' => !empty($entry['hide_title']),
             'custom_fields' => $customFields,
             'key' => isset($entry['key'])
                 && is_string($entry['key'])
-                && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $entry['key'])
+                && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $entry['key'])
                     ? $entry['key']
                     : null,
         ];
@@ -554,7 +819,7 @@ foreach ($data['devices'] as $entry) {
         /* Domoticz group/scene — the idx is the scene key e.g. 's1' */
         $groupKey = $entry['idx'];
         $name = (isset($entry['name']) && is_string($entry['name']))
-            ? substr(trim($entry['name']), 0, 100)
+            ? configwriter_cut_bytes(trim($entry['name']), 100)
             : $groupKey;
         if ($name === '') {
             $name = $groupKey;
@@ -579,9 +844,9 @@ foreach ($data['devices'] as $entry) {
             }
         }
         $title = isset($entry['title']) && is_string($entry['title'])
-            ? substr(trim($entry['title']), 0, 100) : '';
+            ? configwriter_cut_bytes(trim($entry['title']), 100) : '';
         $icon = array_key_exists('icon', $entry) && is_string($entry['icon'])
-            ? substr($entry['icon'], 0, 100) : null;
+            ? configwriter_cut_bytes($entry['icon'], 100) : null;
         $devices[] = [
             'idx' => $groupKey,
             'isGroup' => true,
@@ -592,7 +857,7 @@ foreach ($data['devices'] as $entry) {
             'title' => $title,
             'icon' => $icon,
             'hide_data' => !empty($entry['hide_data']),
-            'last_update' => !empty($entry['last_update']),
+            'last_update' => _dashticz_editor_last_update($entry),
             'switch' => !empty($entry['switch']),
             'type' => _dashticz_editor_block_type($entry),
             'hide_title' => !empty($entry['hide_title']),
@@ -613,38 +878,51 @@ if ($readError !== null) {
 
 $screenNumber = configwriter_parse_screen_number($data, 1);
 list($startMarker, $endMarker) = configwriter_editor_markers('device', $screenNumber);
+
+/* A reference-only entry keeps its block as it is. The block must exist, and
+ * when it sits in this screen's device section (which is replaced below) its
+ * definition is written back unchanged. */
+$declaredBlocks = configwriter_extract_block_lines($config);
+$ownSectionBlocks = configwriter_extract_block_lines(
+    configwriter_extract_wrapped_section($config, $startMarker, $endMarker)
+);
+foreach ($devices as $device) {
+    if (!empty($device['isRef']) && !isset($declaredBlocks[$device['key']])) {
+        dashticz_json_error(400, 'Unknown block reference.');
+    }
+}
 $config = configwriter_remove_section($config, $startMarker, $endMarker);
 $config = rtrim($config);
 
 $blockKeys = [];
 $blocksOnly = !empty($data['blocksOnly']);
 if (!empty($devices)) {
-    $keyCollisionConfig = $config;
-    if ($blocksOnly) {
-        /* The active screen's editor sections are replaced by savegridlayout.php
-         * immediately after this request. Ignore their keys for collision
-         * detection so device_1498 is reused instead of becoming device_1498_2.
-         * Hand-written blocks outside these sections still reserve their keys. */
-        $keyCollisionConfig = configwriter_remove_editor_sections(
-            $keyCollisionConfig,
-            $screenNumber
-        );
-        list($gridStartMarker, $gridEndMarker) = configwriter_editor_markers(
-            'grid-layout',
-            $screenNumber
-        );
+    /* The active screen's editor sections are replaced by this request and
+     * by savelayout.php/savegridlayout.php right after it. Ignore their keys
+     * for collision detection, so device_1498 is reused instead of becoming
+     * device_1498_2, and so a special block (title, dummy, custom, slide
+     * button) that the editor saved before is written again with the edits
+     * of this request instead of being kept as if it were hand-written.
+     * Hand-written blocks outside these sections still reserve their keys. */
+    $keyCollisionConfig = configwriter_remove_editor_sections(
+        $config,
+        $screenNumber
+    );
+    list($gridStartMarker, $gridEndMarker) = configwriter_editor_markers(
+        'grid-layout',
+        $screenNumber
+    );
+    $keyCollisionConfig = configwriter_remove_section(
+        $keyCollisionConfig,
+        $gridStartMarker,
+        $gridEndMarker
+    );
+    if ($screenNumber === 0) {
         $keyCollisionConfig = configwriter_remove_section(
             $keyCollisionConfig,
-            $gridStartMarker,
-            $gridEndMarker
+            '// [standby-editor-start]',
+            '// [standby-editor-end]'
         );
-        if ($screenNumber === 0) {
-            $keyCollisionConfig = configwriter_remove_section(
-                $keyCollisionConfig,
-                '// [standby-editor-start]',
-                '// [standby-editor-end]'
-            );
-        }
     }
     $usedKeys = array_keys(
         configwriter_extract_declared_block_refs($keyCollisionConfig)
@@ -658,7 +936,12 @@ if (!empty($devices)) {
     );
     $requestKeys = [];
     foreach ($devices as &$device) {
-        if (isset($device['kind']) && (in_array($device['kind'], ['dummy', 'title', 'custom'], true) || $device['kind'] === 'slidebutton')) {
+        if (!empty($device['isRef'])) {
+            if (isset($requestKeys[$device['key']])) {
+                dashticz_json_error(409, 'Block reference used twice.');
+            }
+            $requestKeys[$device['key']] = true;
+        } elseif (isset($device['kind']) && (in_array($device['kind'], ['dummy', 'title', 'custom'], true) || $device['kind'] === 'slidebutton')) {
             /* The browser generates stable numbered keys for special blocks. */
             if (isset($requestKeys[$device['key']])) {
                 dashticz_json_error(409, 'Special block key already exists.');
@@ -708,6 +991,13 @@ if (!empty($devices)) {
     $section = configwriter_section_header('BLOCKS') . "\n";
     $section .= "if (typeof blocks === 'undefined') var blocks = {}\n";
     foreach ($devices as $device) {
+        if (!empty($device['isRef'])) {
+            if (isset($ownSectionBlocks[$device['key']])) {
+                $section .= "blocks['" . configwriter_js_string_escape($device['key'])
+                    . "'] = " . $ownSectionBlocks[$device['key']] . "\n";
+            }
+            continue;
+        }
         if (!empty($device['preserveExisting'])) {
             continue;
         }
@@ -718,7 +1008,11 @@ if (!empty($devices)) {
         // block definitions. Preserve an explicitly unchecked Last update
         // option as last_update:false instead of omitting the property and
         // falling back to the global config['last_update'] after reload (#172).
-        if (isset($device['kind']) && $device['kind'] === 'custom') {
+        // null (not set on the block, not changed in the editor) stays out
+        // so the tile keeps following the global setting.
+        if (isset($device['kind']) && $device['kind'] === 'custom'
+            && $device['last_update'] !== null
+        ) {
             $props['last_update'] = !empty($device['last_update']);
         }
         $section .= configwriter_emit_block_line($device['key'], $props);

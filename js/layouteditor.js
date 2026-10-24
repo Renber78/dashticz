@@ -26,20 +26,7 @@ var DashticzLayoutEditor = (function () {
   // Timegraph/TV Guide additions for the pattern) touches this one array
   // instead of two separately hand-duplicated `item.kind === 'x' || ...`
   // chains.
-  var REFERENCE_BASED_SPECIAL_KINDS = [
-    'separator',
-    'html',
-    'iframe',
-    'calendar',
-    'publictransport',
-    'timegraph',
-    'xmltvguide',
-    'lms',
-    'group',
-    'camera',
-    'news',
-    'graph',
-  ];
+  var REFERENCE_BASED_SPECIAL_KINDS = DT_function.widgetKinds('referenceBased');
   var active = false;
   var items = [];
   var itemById = {};
@@ -66,6 +53,7 @@ var DashticzLayoutEditor = (function () {
   // items (see addPendingItems). Never reset - a monotonic counter across
   // the page's lifetime can't collide with itself.
   var pendingKeyCounter = 0;
+  var _titleReferencesIssued = {};
   // Devices removed via the remove button during this editing round (see
   // _removeItem) - their saved Device Rules, if any, are deleted only once
   // the removal is actually confirmed with Save (_save), never on Cancel.
@@ -531,6 +519,8 @@ var DashticzLayoutEditor = (function () {
   var WIDGET_KEY_TYPE = {
     weather: { key: 'widget_weather', type: 'weather' },
     garbage: { key: 'widget_garbage', type: 'garbage' },
+    postnl: { key: 'widget_postnl', type: 'postnl' },
+    hpilo: { key: 'widget_hpilo', type: 'hpilo' },
     spotify: { key: 'widget_spotify', type: 'spotify' },
     sonarr: { key: 'widget_sonarr', type: 'sonarr' },
     clock: { key: 'widget_clock', type: 'basicclock' },
@@ -1171,6 +1161,17 @@ var DashticzLayoutEditor = (function () {
 
     if (
       key &&
+      _isCustomDeviceBlock(key, definition) &&
+      !_widgetIdFromReference(ref, definition)
+    ) {
+      // Same order as deviceeditor.js's _specialFromReference(): a block with
+      // a hand-picked key and a device idx is a Custom device, also when it
+      // carries a htmlfile, frameurl or other special property.
+      return _resolveDeviceBlock(ref, definition, key);
+    }
+
+    if (
+      key &&
       !definition.type &&
       typeof definition.htmlfile === 'string' &&
       definition.htmlfile !== ''
@@ -1221,20 +1222,25 @@ var DashticzLayoutEditor = (function () {
       key &&
       key !== 'widget_calendar' &&
       String(definition.type || '').toLowerCase() !== 'calendar' &&
-      typeof definition.icalurl === 'string' &&
-      definition.icalurl !== ''
+      ((typeof definition.icalurl === 'string' && definition.icalurl !== '') ||
+        (definition.icalurl &&
+          typeof definition.icalurl === 'object' &&
+          !Array.isArray(definition.icalurl) &&
+          Object.keys(definition.icalurl).length > 0))
     ) {
       // Repeatable Calendar block, added via the Screen Editor's "Add
       // items" -> Calendar quick-add popup (js/deviceeditor.js's
       // _showCalendarPopup()), mirroring the iframe check above and
       // deviceeditor.js's own _specialFromReference(): dispatched purely
-      // on a truthy icalurl string (js/components/calendar.js's
-      // canHandle()), no `type` of its own. The fixed 'widget_calendar'
-      // key, and any block with an explicit type: 'calendar' (the legacy
-      // multi-source `calendars` array shape the Widgets catalog's own
-      // singleton entry writes, where icalurl is an object rather than a
-      // string), are excluded so those keep going through the generic
-      // widget path below unchanged.
+      // on a truthy icalurl (js/components/calendar.js's canHandle()), no
+      // `type` of its own - a single calendar keeps icalurl as a plain
+      // string, and the "+" button in that popup turns it into the
+      // name -> {ics, color} object shape once a second calendar is
+      // added, so both must be recognized here. The fixed 'widget_calendar'
+      // key, and any block with an explicit type: 'calendar' (the Widgets
+      // catalog's own singleton entry, which also stores icalurl as that
+      // same object shape but always carries this type), are excluded so
+      // those keep going through the generic widget path below unchanged.
       return {
         definition: definition,
         kind: 'calendar',
@@ -1351,6 +1357,72 @@ var DashticzLayoutEditor = (function () {
       };
     }
 
+    if (key && definition.fullymode === 'charge') {
+      // Repeatable Fully Kiosk block (js/deviceeditor.js's
+      // _showFullykioskPopup()), dispatched purely on fullymode
+      // (js/components/fullykiosk.js's canHandle()).
+      return {
+        definition: definition,
+        kind: 'fullykiosk',
+        reference: key,
+        widgetId: null,
+        idx: null,
+        subidx: 0,
+        name: definition.title || key,
+      };
+    }
+
+    if (key && definition.wimode === 'forecast') {
+      // Repeatable Weather Info block (js/deviceeditor.js's
+      // _showWeatherinfoPopup()), dispatched purely on wimode
+      // (js/components/weatherinfo.js's canHandle()).
+      return {
+        definition: definition,
+        kind: 'weatherinfo',
+        reference: key,
+        widgetId: null,
+        idx: null,
+        subidx: 0,
+        name: definition.title || key,
+      };
+    }
+
+    if (key && typeof definition.tvgids === 'string' && definition.tvgids) {
+      // Repeatable TVgids block (js/deviceeditor.js's _showTvgidsPopup()),
+      // dispatched purely on a truthy tvgids channel list
+      // (js/components/tvgids.js's canHandle()), like the F1 check below.
+      return {
+        definition: definition,
+        kind: 'tvgids',
+        reference: key,
+        widgetId: null,
+        idx: null,
+        subidx: 0,
+        name: definition.title || key,
+      };
+    }
+
+    if (
+      key &&
+      ((typeof definition.f1mode === 'string' && definition.f1mode) ||
+        /^(?:f1|f1events)$/i.test(String(definition.type || '')))
+    ) {
+      // Repeatable F1 block (js/deviceeditor.js's _showF1Popup()),
+      // dispatched purely on a truthy f1mode (js/components/f1.js's
+      // canHandle()), no `type` of its own - like the news/graph checks.
+      // Legacy singleton type:'f1'/'f1events' blocks are recognized too, so
+      // their config cog remains available until Device Editor migrates them.
+      return {
+        definition: definition,
+        kind: 'f1',
+        reference: key,
+        widgetId: null,
+        idx: null,
+        subidx: 0,
+        name: definition.title || key,
+      };
+    }
+
     if (
       key &&
       key !== 'widget_news' &&
@@ -1441,6 +1513,23 @@ var DashticzLayoutEditor = (function () {
       };
     }
 
+    if (key && String(definition.type || '').toLowerCase() === 'cluster') {
+      // Cluster (js/components/cluster.js): a fixed list of devices shown
+      // as individually-switchable rows in one block, dispatched on
+      // type: 'cluster' like Group's type: 'group' just above and
+      // mirroring deviceeditor.js's _specialFromReference(). Always
+      // idx-less (no single device backs the whole block), unlike Group.
+      return {
+        definition: definition,
+        kind: 'cluster',
+        reference: key,
+        widgetId: null,
+        idx: null,
+        subidx: 0,
+        name: definition.title || key,
+      };
+    }
+
     if (
       key &&
       typeof definition.idx === 'undefined' &&
@@ -1477,6 +1566,25 @@ var DashticzLayoutEditor = (function () {
       };
     }
 
+    return _resolveDeviceBlock(ref, definition, key);
+  }
+
+  function _isCustomDeviceBlock(key, definition) {
+    var type = String(definition.type || '');
+    var idx = definition.idx;
+    return (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) &&
+      !/^device_\d+(?:_\d+)?$/.test(key) &&
+      (!definition.type || type === 'dial' || type === 'bar' || type === key) &&
+      (parseInt(idx, 10) > 0 ||
+        /^v\d+$/.test(String(idx)) ||
+        (/^s\d+$/.test(String(idx)) && !/^s\d+$/.test(key)))
+    );
+  }
+
+  /* The device part of _resolveBlock(): a block backed by a Domoticz idx,
+     a 's<idx>'/'v<idx>' scene or variable, or '<idx>_<subidx>'. */
+  function _resolveDeviceBlock(ref, definition, key) {
     var rawIdx = typeof definition.idx !== 'undefined' ? definition.idx : ref;
     // 's<idx>' (scene/group) and 'v<idx>' (Domoticz variable, see
     // js/domoticz-api.js's _setAllVariables() and
@@ -1545,6 +1653,8 @@ var DashticzLayoutEditor = (function () {
       widget_longfonds: 'longfonds',
       widget_moon: 'moon',
       widget_news: 'news',
+      widget_postnl: 'postnl',
+      widget_hpilo: 'hpilo',
       widget_xmltvguide: 'xmltvguide',
       // Streamplayer/Radio is dispatched by its component name directly (see
       // Dashticz._mount in dashticz.js), so its block is always keyed
@@ -1607,6 +1717,8 @@ var DashticzLayoutEditor = (function () {
       waqi: 'longfonds',
       moon: 'moon',
       news: 'news',
+      postnl: 'postnl',
+      hpilo: 'hpilo',
       basicclock: 'clock',
       stationclock: 'clock',
       flipclock: 'clock',
@@ -1860,7 +1972,8 @@ var DashticzLayoutEditor = (function () {
         !item.isPending &&
         (item.kind === 'device' ||
           item.kind === 'widget' ||
-          REFERENCE_BASED_SPECIAL_KINDS.indexOf(item.kind) > -1);
+          REFERENCE_BASED_SPECIAL_KINDS.indexOf(item.kind) > -1) &&
+        _hasOpenableConfig(item);
       var configureLabel =
         item.kind === 'widget'
           ? _t('configure_widget')
@@ -1973,12 +2086,21 @@ var DashticzLayoutEditor = (function () {
       });
   }
 
+  // js/deviceeditor.js's _specialFromReference() only recognises special
+  // blocks stored under a plain identifier key. For any other key (for example
+  // 'my-clock') its config popup cannot open, so such a tile gets no cog.
+  function _hasOpenableConfig(item) {
+    if (REFERENCE_BASED_SPECIAL_KINDS.indexOf(item.kind) < 0) return true;
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(String(item.reference));
+  }
+
   function _openItemConfig(item) {
     if (!item) return;
     if (
       (item.kind === 'device' ||
         REFERENCE_BASED_SPECIAL_KINDS.indexOf(item.kind) > -1) &&
-      item.reference
+      item.reference &&
+      _hasOpenableConfig(item)
     ) {
       DT_function.loadDTScript('js/deviceeditor.js').then(function () {
         if (
@@ -2581,6 +2703,7 @@ var DashticzLayoutEditor = (function () {
      out as a plain payload; the screen the user is actually looking at is
      restored once every session has been read. */
   function _buildSavePayloads() {
+    _titleReferencesIssued = {};
     var activeKey = currentSessionKey;
     sessions[activeKey] = _captureSession();
 
@@ -2632,12 +2755,7 @@ var DashticzLayoutEditor = (function () {
           return;
         }
 
-        var deviceEntry = {
-          idx: item.idx,
-          name: item.name,
-          width: item.width,
-        };
-        if (item.subidx) deviceEntry.subidx = item.subidx;
+        var deviceEntry = _classicDeviceEntry(item);
         if (item.height !== null) deviceEntry.height = item.height;
         devices.push(deviceEntry);
       });
@@ -2654,6 +2772,46 @@ var DashticzLayoutEditor = (function () {
     _restoreSession(sessions[activeKey]);
     currentSessionKey = activeKey;
     return payloads;
+  }
+
+  /* The saveblocks.php entry of one non-widget tile on a classic screen.
+     A block that is already defined in CONFIG.js is sent as a reference
+     only, so its icon, title, custom fields and so on stay as they are; only
+     a tile that is still pending, or a bare device idx, is described in full. */
+  function _classicDeviceEntry(item) {
+    if (
+      !item.isPending &&
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(item.reference) &&
+      typeof blocks !== 'undefined' &&
+      blocks[item.reference]
+    ) {
+      return { ref: item.reference, width: item.width };
+    }
+    if (item.isPending && item.kind === 'separator') {
+      return {
+        kind: 'title',
+        key: _nextTitleReference(),
+        title: item.name || 'Title',
+        width: item.width,
+      };
+    }
+    var entry = { idx: item.idx, name: item.name, width: item.width };
+    if (item.subidx) entry.subidx = item.subidx;
+    return entry;
+  }
+
+  function _nextTitleReference() {
+    var number = 1;
+    var taken = {};
+    items.forEach(function (item) {
+      taken[item.reference] = true;
+    });
+    var used = function (key) {
+      return taken[key] || (typeof blocks !== 'undefined' && blocks[key]);
+    };
+    while (used('Title_' + number) || _titleReferencesIssued[number]) number++;
+    _titleReferencesIssued[number] = true;
+    return 'Title_' + number;
   }
 
   function _saveScreenPayload(screenPayload, token) {

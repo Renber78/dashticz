@@ -82,6 +82,26 @@ $allowedSettings = [
     'sonarr_url'             => 'string',
     'sonarr_apikey'          => 'string',
     'sonarr_maxitems'        => 'number',
+    // postnl
+    'postnl_username'        => 'string',
+    'postnl_password'        => 'string',
+    'postnl_days'            => 'number',
+    'postnl_pollminutes'     => 'number',
+    'postnl_fontsize'        => 'number',
+    'postnl_showdelivered'   => 'bool',
+    'postnl_iconstyle'       => 'string',
+    'postnl_date_color'      => 'hex_color',
+    'postnl_time_color'      => 'hex_color',
+    'postnl_text_color'      => 'hex_color',
+    // hp ilo
+    'hpilo_host'             => 'string',
+    'hpilo_port'             => 'number',
+    'hpilo_username'         => 'string',
+    'hpilo_password'         => 'string',
+    'hpilo_pollseconds'      => 'number',
+    'hpilo_fontsize'         => 'number',
+    'hpilo_rows'             => 'hpilo_rows',
+    'hpilo_icons'            => 'hpilo_icons',
     // spotify
     'spot_clientid'          => 'string',
     // calendar
@@ -136,8 +156,17 @@ $allowedWeatherIcons = ['line', 'linestatic', 'fill', 'static', 'meteo'];
 
 $allowedWaqiLayouts = ['xsmall', 'small', 'large', 'xlarge', 'xxl'];
 
+$allowedHpiloRows = [
+    'name', 'model', 'power', 'health', 'uptime', 'fanspeed',
+    'cputemp', 'inlettemp', 'watts', 'storage', 'ssdlife', 'firmware', 'network',
+    'serial', 'minfan', 'thermalconfig', 'powerregulator',
+];
+
 // Process optional config settings
 $configSettings = [];
+// Number settings sent empty: no value (so no 0 in CONFIG.js, which would pin
+// e.g. a map zoom of 0); any value saved earlier is removed.
+$clearedSettings = [];
 if (isset($data['settings']) && is_array($data['settings'])) {
     foreach ($data['settings'] as $key => $value) {
         if (!preg_match('/^[A-Za-z0-9_]+$/', $key) || !isset($allowedSettings[$key])) {
@@ -147,6 +176,14 @@ if (isset($data['settings']) && is_array($data['settings'])) {
         if ($type === 'bool') {
             $configSettings[$key] = (int)(bool)$value;
         } elseif ($type === 'number') {
+            if ($value === null || (is_string($value) && trim($value) === '')) {
+                $clearedSettings[$key] = true;
+                continue;
+            }
+            if (is_numeric($value) && !is_finite((float)$value)) {
+                $clearedSettings[$key] = true;
+                continue;
+            }
             $configSettings[$key] = is_numeric($value) ? (float)$value : 0;
             if ($configSettings[$key] == (int)$configSettings[$key]) {
                 $configSettings[$key] = (int)$configSettings[$key];
@@ -167,6 +204,32 @@ if (isset($data['settings']) && is_array($data['settings'])) {
             if (in_array((string)$value, $allowedWaqiLayouts, true)) {
                 $configSettings[$key] = (string)$value;
             }
+        } elseif ($type === 'hpilo_rows') {
+            // Ordered, comma-separated list of known HP iLO row keys.
+            $rows = [];
+            foreach (explode(',', (string)$value) as $row) {
+                $row = trim($row);
+                if (in_array($row, $allowedHpiloRows, true) && !in_array($row, $rows, true)) {
+                    $rows[] = $row;
+                }
+            }
+            $configSettings[$key] = implode(',', $rows);
+        } elseif ($type === 'hpilo_icons') {
+            // JSON map of known HP iLO row keys to a Font Awesome class
+            // string ('none' hides the icon); anything else is dropped.
+            $decodedIcons = json_decode((string)$value, true);
+            $icons = [];
+            if (is_array($decodedIcons)) {
+                foreach ($decodedIcons as $iconRow => $iconClass) {
+                    if (in_array($iconRow, $allowedHpiloRows, true)
+                        && is_string($iconClass)
+                        && preg_match('/^[A-Za-z0-9 _-]{1,60}$/', $iconClass)
+                    ) {
+                        $icons[$iconRow] = $iconClass;
+                    }
+                }
+            }
+            $configSettings[$key] = json_encode((object)$icons);
         } elseif ($type === 'security_panel_lock') {
             if (in_array($value, [0, 1, 2, '0', '1', '2'], true)) {
                 $configSettings[$key] = (int)$value;
@@ -189,6 +252,8 @@ if (isset($data['settings']) && is_array($data['settings'])) {
 $catalog = [
     'weather' => ['key' => 'widget_weather', 'width' => 4, 'height' => 120],
     'garbage' => ['key' => 'widget_garbage', 'width' => 5, 'height' => 160],
+    'postnl' => ['key' => 'widget_postnl', 'width' => 6, 'height' => 160],
+    'hpilo' => ['key' => 'widget_hpilo', 'width' => 4, 'height' => 200],
     'spotify' => ['key' => 'widget_spotify', 'width' => 4, 'height' => 120],
     'sonarr' => ['key' => 'widget_sonarr', 'width' => 4, 'height' => 120],
     'clock' => ['key' => 'widget_clock', 'width' => 4],
@@ -273,7 +338,7 @@ foreach ($data['widgets'] as $entry) {
         'id' => $id,
         'key' => isset($entry['key'])
             && is_string($entry['key'])
-            && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $entry['key'])
+            && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $entry['key'])
                 ? $entry['key']
                 : $catalog[$id]['key'],
         'width' => isset($entry['width'])
@@ -285,7 +350,12 @@ foreach ($data['widgets'] as $entry) {
         'hide_title' => !empty($entry['hide_title']),
         'icon' => null,
         'hide_data' => !empty($entry['hide_data']),
-        'last_update' => !empty($entry['last_update']),
+        // null = the block has no last_update of its own and follows the
+        // global setting; an explicit false must survive a save.
+        'last_update' => array_key_exists('last_update', $entry)
+            && $entry['last_update'] !== null
+            ? !empty($entry['last_update'])
+            : null,
     ];
     if (isset($entry['icon']) && is_string($entry['icon'])) {
         $icon = trim($entry['icon']);
@@ -318,7 +388,7 @@ foreach ($data['widgets'] as $entry) {
         $seenCustomFields = [];
         foreach ($entry['custom_fields'] as $field => $value) {
             if (!is_string($field) ||
-                !preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/', $field)) {
+                !preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/D', $field)) {
                 dashticz_json_error(400, 'Invalid custom widget field.');
             }
             $fieldKey = strtolower($field);
@@ -404,7 +474,9 @@ foreach ($data['widgets'] as $entry) {
         } elseif (is_array($icalurl) && count($icalurl) > 0 && count($icalurl) <= 20) {
             $widget['icalurl'] = [];
             foreach ($icalurl as $name => $source) {
-                if (!is_string($name) || $name === '' || strlen($name) > 100 ||
+                // json_decode turns a name such as "1" into an integer key.
+                $name = (string)$name;
+                if ($name === '' || strlen($name) > 100 ||
                     preg_match('/[\x00-\x1F]/', $name) ||
                     in_array(strtolower($name), ['__proto__', 'prototype', 'constructor'], true)) {
                     dashticz_json_error(400, 'Each calendar requires a valid unique name.');
@@ -415,7 +487,7 @@ foreach ($data['widgets'] as $entry) {
                 $ics = isset($source['ics']) && is_string($source['ics'])
                     ? trim($source['ics'])
                     : '';
-                if ($ics === '' || strlen($ics) > 2048 || !preg_match('#^https?://[^\s]+$#i', $ics)) {
+                if ($ics === '' || strlen($ics) > 2048 || !preg_match('#^(?:https?|webcal)://[^\s]+$#i', $ics)) {
                     dashticz_json_error(400, 'Calendar ' . $name . ' requires a valid http(s) ICS URL.');
                 }
                 $color = isset($source['color']) && is_string($source['color'])
@@ -519,8 +591,6 @@ foreach ($data['widgets'] as $entry) {
             || (bool)$entry['trafficJams'];
         $widget['roadWorks'] = !array_key_exists('roadWorks', $entry)
             || (bool)$entry['roadWorks'];
-        $widget['radars'] = !array_key_exists('radars', $entry)
-            || (bool)$entry['radars'];
         $results = isset($entry['results']) && is_numeric($entry['results'])
             ? (int)$entry['results']
             : 5;
@@ -534,6 +604,34 @@ foreach ($data['widgets'] as $entry) {
         }
         if (isset($entry['longitude']) && is_numeric($entry['longitude'])) {
             $widget['longitude'] = (float)$entry['longitude'];
+        }
+        // Distance (everything within maxDistance) or Roads (only the
+        // road numbers in `road`, e.g. "A4, A17").
+        $widget['filter'] = isset($entry['filter']) && $entry['filter'] === 'roads'
+            ? 'roads'
+            : 'distance';
+        $road = isset($entry['road']) && is_string($entry['road'])
+            ? $entry['road']
+            : '';
+        $road = trim(preg_replace('/[^A-Za-z0-9 ,;\-]/', '', $road));
+        if (strlen($road) > 200) {
+            dashticz_json_error(400, 'The road list is too long.');
+        }
+        $widget['road'] = $road;
+        // true/false, or a custom "no announcements" text kept from
+        // CONFIG.js.
+        $showEmptyRoads = isset($entry['showemptyroads'])
+            ? $entry['showemptyroads']
+            : false;
+        if (is_string($showEmptyRoads) && $showEmptyRoads !== ''
+            && !in_array(strtolower($showEmptyRoads), ['0', '1', 'true', 'false'], true)
+        ) {
+            $widget['showemptyroads'] = configwriter_cut_bytes(strip_tags($showEmptyRoads), 100);
+        } else {
+            $widget['showemptyroads'] = filter_var(
+                $showEmptyRoads,
+                FILTER_VALIDATE_BOOLEAN
+            );
         }
     }
 
@@ -930,7 +1028,7 @@ $config = configwriter_remove_section($config, $startMarker, $endMarker);
 $config = rtrim($config);
 $blocksOnly = !empty($data['blocksOnly']);
 
-if (!empty($widgets)) {
+if (!empty($widgets) || !empty($configSettings) || !empty($clearedSettings)) {
     // TAAK1: never let a widget silently take over a block key that a
     // different screen already owns; clone it (screen-prefixed) instead.
     // configwriter_ensure_screen_owned_key() exempts radio/log/sunrise from
@@ -948,46 +1046,54 @@ if (!empty($widgets)) {
     }
     unset($widget);
 
-    $section = configwriter_section_header('BLOCKS') . "\n";
-    $section .= "if (typeof blocks === 'undefined') var blocks = {}\n";
+    $section = '';
+    if (!empty($widgets)) {
+        $section = configwriter_section_header('BLOCKS') . "\n";
+        $section .= "if (typeof blocks === 'undefined') var blocks = {}\n";
 
-    foreach ($widgets as $widget) {
-        $props = _widgetBlockProps($widget);
-        $section .= configwriter_emit_block_line($widget['key'], $props);
-    }
+        foreach ($widgets as $widget) {
+            $props = _widgetBlockProps($widget);
+            $section .= configwriter_emit_block_line($widget['key'], $props);
+        }
 
-    if (!$blocksOnly) {
-        $section .= "\n" . configwriter_section_header('COLUMNS') . "\n";
-        $section .= "if (typeof columns === 'undefined') var columns = {}\n";
-        $layoutItems = array_map(function ($widget) {
-            $item = [
-                'ref' => $widget['key'],
-                'width' => $widget['width'],
-            ];
-            if ($widget['height'] !== null) {
-                $item['height'] = $widget['height'];
+        if (!$blocksOnly) {
+            $section .= "\n" . configwriter_section_header('COLUMNS') . "\n";
+            $section .= "if (typeof columns === 'undefined') var columns = {}\n";
+            $layoutItems = array_map(function ($widget) {
+                $item = [
+                    'ref' => $widget['key'],
+                    'width' => $widget['width'],
+                ];
+                if ($widget['height'] !== null) {
+                    $item['height'] = $widget['height'];
+                }
+                return $item;
+            }, $widgets);
+            $columnKeys = [];
+            $prefix = configwriter_column_prefix('we', $screenNumber);
+            foreach (configwriter_pack_columns_by_height($layoutItems, 12, $prefix) as $column) {
+                $columnKeys[] = $column['key'];
+                $section .= configwriter_emit_column_line(
+                    $column['key'],
+                    $column['blocks'],
+                    $column['width']
+                );
             }
-            return $item;
-        }, $widgets);
-        $columnKeys = [];
-        $prefix = configwriter_column_prefix('we', $screenNumber);
-        foreach (configwriter_pack_columns_by_height($layoutItems, 12, $prefix) as $column) {
-            $columnKeys[] = $column['key'];
-            $section .= configwriter_emit_column_line(
-                $column['key'],
-                $column['blocks'],
-                $column['width']
-            );
-        }
 
-        if ($screenNumber > 0) {
-            $section .= "\n" . configwriter_section_header('SCREENS') . "\n";
-            $section .= configwriter_emit_screen_columns($screenNumber, $columnKeys, 'merge');
+            if ($screenNumber > 0) {
+                $section .= "\n" . configwriter_section_header('SCREENS') . "\n";
+                $section .= configwriter_emit_screen_columns($screenNumber, $columnKeys, 'merge');
+            }
         }
     }
 
-    if (!empty($configSettings)) {
-        $section .= configwriter_emit_config_settings($configSettings, false);
+    if (!empty($configSettings) || !empty($clearedSettings)) {
+        // Keep the previously saved settings this save does not touch.
+        $merged = array_diff_key($existingSettings, $configSettings, $clearedSettings);
+        foreach ($configSettings as $key => $value) {
+            $merged[$key] = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+        $section .= configwriter_emit_config_settings($merged, true);
     } elseif (!empty($existingSettings)) {
         $section .= configwriter_emit_config_settings($existingSettings, true);
     }
@@ -1036,6 +1142,14 @@ function _widgetBlockProps($widget)
             $props['title'] = isset($widget['displayTitle']) ? $widget['displayTitle'] : 'Afval';
             $props['maxitems'] = $widget['maxitems'];
             $props['maxdays'] = $widget['maxdays'];
+            break;
+        case 'postnl':
+            $props['type'] = 'postnl';
+            $props['title'] = 'PostNL';
+            break;
+        case 'hpilo':
+            $props['type'] = 'hpilo';
+            $props['title'] = 'HP iLO';
             break;
         case 'spotify':
             $props['type'] = 'spotify';
@@ -1096,7 +1210,6 @@ function _widgetBlockProps($widget)
             $props['title'] = 'Traffic';
             $props['trafficJams'] = $widget['trafficJams'];
             $props['roadWorks'] = $widget['roadWorks'];
-            $props['radars'] = $widget['radars'];
             $props['results'] = $widget['results'];
             $props['maxDistance'] = $widget['maxDistance'];
             if (isset($widget['latitude'])) {
@@ -1104,6 +1217,13 @@ function _widgetBlockProps($widget)
             }
             if (isset($widget['longitude'])) {
                 $props['longitude'] = $widget['longitude'];
+            }
+            $props['filter'] = $widget['filter'];
+            if ($widget['road'] !== '') {
+                $props['road'] = $widget['road'];
+            }
+            if ($widget['showemptyroads'] !== false) {
+                $props['showemptyroads'] = $widget['showemptyroads'];
             }
             break;
         case 'alarmmeldingen':
@@ -1275,8 +1395,8 @@ function _widgetBlockProps($widget)
     if (!empty($widget['hide_data'])) {
         $props['hide_data'] = true;
     }
-    if (!empty($widget['last_update'])) {
-        $props['last_update'] = true;
+    if (isset($widget['last_update'])) {
+        $props['last_update'] = $widget['last_update'] === true;
     }
     if (!empty($widget['custom_fields'])) {
         // Custom fields are merged last so users can intentionally override a

@@ -1,4 +1,4 @@
-/* global Domoticz settings columns columns_standby blocks blocktypes screens standby_screen DashticzScreenSwitcher standbyActive language getBlockTypesBlock DashticzLayoutEditor DashticzDeviceRules */
+/* global Domoticz settings columns columns_standby blocks blocktypes screens standby_screen DashticzScreenSwitcher standbyActive language getBlockTypesBlock DashticzLayoutEditor DashticzDeviceRules DT_function b64_to_utf8 */
 // eslint-disable-next-line no-unused-vars
 var DashticzDeviceEditor = (function () {
   'use strict';
@@ -25,63 +25,15 @@ var DashticzDeviceEditor = (function () {
   // be meaningless for these). 'group' is handled separately just below
   // its own idx is optional-but-real; 'custom'/'dummy'/'timegraph' keep
   // their real parsed idx.
-  var IDX_LESS_SPECIAL_KINDS = [
-    'title',
-    'slidebutton',
-    'html',
-    'iframe',
-    'calendar',
-    'publictransport',
-    'xmltvguide',
-    'lms',
-    'camera',
-    'news',
-    'graph',
-  ];
+  var IDX_LESS_SPECIAL_KINDS = DT_function.widgetKinds('idxLess');
 
   // Title is optional (blank is fine) rather than required.
-  var TITLE_OPTIONAL_SPECIAL_KINDS = [
-    'custom',
-    'group',
-    'html',
-    'iframe',
-    'calendar',
-    'publictransport',
-    'timegraph',
-    'xmltvguide',
-    'lms',
-    'camera',
-    'news',
-    'graph',
-  ];
-
-  // Defaults to a 6-column width instead of the generic 3-column
-  // default - their content needs more horizontal room.
-  var WIDE_DEFAULT_SPECIAL_KINDS = [
-    'lms',
-    'iframe',
-    'calendar',
-    'timegraph',
-    'xmltvguide',
-    'graph',
-  ];
+  var TITLE_OPTIONAL_SPECIAL_KINDS = DT_function.widgetKinds('titleOptional');
 
   // No Dial/Bar/Slider visual mode of their own, and only Icon/Last
   // update/Title among the Device Config display options (no Data/
   // Switch) - every special except a plain dummy/custom device.
-  var NO_DIAL_SPECIAL_KINDS = [
-    'group',
-    'html',
-    'iframe',
-    'calendar',
-    'publictransport',
-    'timegraph',
-    'xmltvguide',
-    'lms',
-    'camera',
-    'news',
-    'graph',
-  ];
+  var NO_DIAL_SPECIAL_KINDS = DT_function.widgetKinds('noDial');
 
   // _buildDevicePayload()'s shared "just Icon + Last update (+ Group's
   // own optional idx)" branch - a subset of NO_DIAL_SPECIAL_KINDS
@@ -91,17 +43,7 @@ var DashticzDeviceEditor = (function () {
   // option set. Graph fits here too - like html/iframe/calendar its
   // required data (the devices array, plus graph/legend/groupBy) rides
   // through custom_fields instead of a dedicated top-level property.
-  var SIMPLE_ICON_PAYLOAD_KINDS = [
-    'group',
-    'html',
-    'iframe',
-    'calendar',
-    'publictransport',
-    'xmltvguide',
-    'camera',
-    'news',
-    'graph',
-  ];
+  var SIMPLE_ICON_PAYLOAD_KINDS = DT_function.widgetKinds('simpleIconPayload');
   var deviceNames = {}; // composite key -> device name
   var deviceWidths = {}; // composite key -> block width (1..12)
   var deviceHeights = {}; // composite key -> optional block height
@@ -128,6 +70,7 @@ var DashticzDeviceEditor = (function () {
   var gridPositions = {}; // order key -> {x,y,w,h}
   var gridRefs = {}; // order key -> block reference
   var gridExtras = []; // non-device/widget blocks
+  var columnExtras = []; // classic screens: blocks the editor does not manage
   var DEFAULT_GRID_WIDTH = 6;
   var DEFAULT_GRID_HEIGHT = 6;
   var TITLE_GRID_HEIGHT = 2;
@@ -139,6 +82,7 @@ var DashticzDeviceEditor = (function () {
   // instead of persisting immediately and reloading (see
   // _graftIntoLayoutEditor). Null whenever the Layout Editor isn't active.
   var layoutEditorBaseline = null;
+  var layoutEditorBaselineState = null; // _graftSignature() when the editor opened
   // Devices present on the screen when this popup opened (idx/subidx/
   // reference, from managedOrder/deviceRefs before the user made any
   // changes). _save() diffs this against the final managedOrder to find
@@ -173,9 +117,13 @@ var DashticzDeviceEditor = (function () {
         title: 'Title',
         display_options: 'Display options',
         icon: 'Icon',
+        image: 'Image',
         hide_data: 'Hide data',
         last_update: 'Last update',
         switch: 'Switch',
+        reverseicon: 'Reverse',
+        reverseicon_help:
+          'Reverse the dimming: show the icon or image at full strength when Off and dimmed when On.',
         dial: 'Dial',
         dial_hint:
           'Dial type selected. Set the remaining dial options (color, min/max, subtype, values, etc.) manually via Custom fields below.',
@@ -185,6 +133,26 @@ var DashticzDeviceEditor = (function () {
         dial_barsteps_help:
           'Number of segments the Bar is divided into (default 10).',
         invalid_barsteps: 'Enter a positive number of steps.',
+        compact_selector: 'Compact',
+        compact_icons: 'Icon per level',
+        compact_icon_auto: 'Automatic',
+        compact_icon_custom: 'Custom Font Awesome class...',
+        compact_selector_help:
+          'Show the title and the three level buttons (for example Open/Half/Closed) on one line, as small icon buttons. Only applies to selectors with exactly three levels.',
+        text_style: 'Text',
+        text_fontsize_title: 'Title size',
+        text_fontsize_value: 'Value size',
+        text_align: 'Horizontal',
+        text_valign: 'Vertical',
+        text_valign_top: 'Top',
+        text_valign_middle: 'Middle',
+        text_valign_bottom: 'Bottom',
+        text_align_default: 'Theme default',
+        text_align_left: 'Left',
+        text_align_center: 'Center',
+        text_align_right: 'Right',
+        text_style_help:
+          'Font sizes in pixels. Empty fields and Theme default use the selected theme (or the base style); values set here override it for this block only.',
         show_title: 'Title',
         device_config: 'Device Config',
         widget_config: 'Widget Config',
@@ -210,8 +178,9 @@ var DashticzDeviceEditor = (function () {
         invalid_slide_target: 'Enter a valid positive screen number.',
         custom_device_name: 'Device name',
         custom_device_name_help: 'Used as the blocks[...] key in CONFIG.js.',
+        custom_device_idx: 'IDX',
         custom_device_idx_help:
-          "Domoticz device idx, or 'v<idx>' for a Domoticz variable (e.g. v3).",
+          "Domoticz device idx, 's<idx>' for a group or scene (e.g. s3), or 'v<idx>' for a Domoticz variable (e.g. v3).",
         custom_device_title: 'Title',
         custom_device_options: 'Device options',
         custom_device_values_help: 'For arrays or objects, enter valid JSON.',
@@ -246,6 +215,39 @@ var DashticzDeviceEditor = (function () {
         invalid_group_name: 'Enter a valid unique group name.',
         invalid_group_devices:
           'Enter a Group/Scene IDX or at least one valid device ID.',
+        cluster_block: 'Cluster',
+        cluster_name: 'Cluster name',
+        cluster_name_help: 'Used as the blocks[...] key in CONFIG.js.',
+        cluster_title: 'Title',
+        cluster_devices: 'Devices',
+        cluster_devices_help:
+          'Pick a device and click + to add it to the cluster. Each device gets its own on/off toggle.',
+        cluster_devices_help_temperature:
+          'Pick a device and click + to add it to the cluster. Each device shows its own temperature reading.',
+        cluster_devices_help_other:
+          "Pick a device and click + to add it to the cluster. Only devices that are neither a switch nor a temperature sensor are listed; each row shows the device's own value.",
+        cluster_no_devices: 'No devices added yet.',
+        cluster_row_name:
+          'Custom name for this row (leave empty to use the device name).',
+        cluster_usage: 'Consumption',
+        cluster_usage_none: '— No consumption —',
+        cluster_mode: 'Row type',
+        cluster_mode_switch: 'Switch',
+        cluster_mode_temperature: 'Temperature',
+        cluster_mode_other: 'Other',
+        cluster_mode_locked_help:
+          "Row type can't be changed after the cluster has been saved.",
+        cluster_switch_scale: 'Switch size',
+        cluster_switch_scale_help:
+          'Scale factor for the on/off toggle (e.g. 1.5 for 150%). Leave empty for the default size.',
+        cluster_font_size: 'Font size (px)',
+        cluster_font_size_help:
+          'Font size of the whole cluster in pixels (8-60). Leave empty for the default size.',
+        cluster_icon: 'Icon for this row',
+        cluster_icon_none: 'None',
+        cluster_icon_auto: 'Automatic',
+        invalid_cluster_name: 'Enter a valid unique cluster name.',
+        invalid_cluster_devices: 'Add at least one device.',
         html_block: 'HTML Block',
         html_block_name: 'Block name',
         html_block_name_help: 'Used as the blocks[...] key in CONFIG.js.',
@@ -276,6 +278,7 @@ var DashticzDeviceEditor = (function () {
         lms_player_placeholder: 'Test the connection to list players',
         lms_refresh_interval: 'Refresh interval',
         lms_hide_when_off: 'Hide block when player is off',
+        lms_player_controls: 'Player controls',
         invalid_lms_server: 'Enter the Lyrion Music Server address.',
         invalid_lms_port: 'Enter a valid port (1-65535).',
         invalid_lms_player: 'Test the connection and select a player.',
@@ -431,6 +434,15 @@ var DashticzDeviceEditor = (function () {
     _showGroupPopup();
   }
 
+  /** Open the dedicated Cluster block popup used by the Screen Editor add menu. */
+  function openCluster() {
+    editorMode = 'devices';
+    gridMode = _activeScreenDom().hasClass('dt-grid-screen');
+    _init();
+    _prepareManagedDeviceState();
+    _showClusterPopup();
+  }
+
   /** Open the dedicated HTML Block popup used by the Screen Editor add menu. */
   function openHtmlBlock() {
     editorMode = 'devices';
@@ -502,6 +514,42 @@ var DashticzDeviceEditor = (function () {
     _init();
     _prepareManagedDeviceState();
     _showGraphPopup();
+  }
+
+  /** Open the dedicated F1 popup used by the Screen Editor add menu. */
+  function openF1() {
+    editorMode = 'devices';
+    gridMode = _activeScreenDom().hasClass('dt-grid-screen');
+    _init();
+    _prepareManagedDeviceState();
+    _showF1Popup();
+  }
+
+  /** Open the dedicated TVgids popup used by the Widgets menu. */
+  function openTvgids() {
+    editorMode = 'devices';
+    gridMode = _activeScreenDom().hasClass('dt-grid-screen');
+    _init();
+    _prepareManagedDeviceState();
+    _showTvgidsPopup();
+  }
+
+  /** Open the dedicated Fully Kiosk popup used by the Widgets menu. */
+  function openFullykiosk() {
+    editorMode = 'devices';
+    gridMode = _activeScreenDom().hasClass('dt-grid-screen');
+    _init();
+    _prepareManagedDeviceState();
+    _showFullykioskPopup();
+  }
+
+  /** Open the dedicated Weather Info popup used by the Widgets menu. */
+  function openWeatherinfo() {
+    editorMode = 'devices';
+    gridMode = _activeScreenDom().hasClass('dt-grid-screen');
+    _init();
+    _prepareManagedDeviceState();
+    _showWeatherinfoPopup();
   }
 
   /** Open the dedicated News popup used by the Screen Editor add menu. */
@@ -611,6 +659,7 @@ var DashticzDeviceEditor = (function () {
     gridPositions = {};
     gridRefs = {};
     gridExtras = [];
+    columnExtras = [];
     gridConfig = gridMode ? _readGridConfig() : null;
 
     (gridMode ? _getAllManagedGridItems() : _getAllManagedItems()).forEach(
@@ -679,6 +728,7 @@ var DashticzDeviceEditor = (function () {
       DashticzLayoutEditor.isActive()
         ? managedOrder.slice()
         : null;
+    layoutEditorBaselineState = null;
 
     openDeviceEntries = managedOrder
       .filter(function (orderKey) {
@@ -795,6 +845,22 @@ var DashticzDeviceEditor = (function () {
   /* Build the same immutable reference that saveblocks.php uses. Supplying the
      reference in the initial request keeps a newly added device addressable
      throughout the complete blocks -> layout save chain. */
+  // The key a device block has on the page, when that is a key the server
+  // accepts; the stable device_<idx> key otherwise.
+  function _existingDeviceReference(ck) {
+    var reference = deviceRefs[ck];
+    if (
+      typeof reference === 'string' &&
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(reference) &&
+      typeof blocks !== 'undefined' &&
+      blocks[reference] &&
+      _toCompositeKey(blocks[reference]) === ck
+    ) {
+      return reference;
+    }
+    return _stableDeviceReference(ck);
+  }
+
   function _stableDeviceReference(ck) {
     if (_isGroupCk(ck)) return String(ck);
     var parsed = _parseCk(ck);
@@ -812,6 +878,110 @@ var DashticzDeviceEditor = (function () {
   }
   function _normalizeCustomVariableIdx(idx) {
     return 'v' + idx.slice(1);
+  }
+
+  /* A block under a hand-picked key may also reference one sub-device of a
+     multi-value Domoticz device as '<idx>_<subidx>' (e.g. '274_1' for the
+     current usage of a P1 Smart Meter). savegridlayout.php writes exactly
+     that shape when a sub-device from the Device Editor list is placed on a
+     grid screen, under a key named after its "Power (1)" label, so it is
+     classified as a Custom device below. Keep the full string: parseInt()
+     would silently drop the sub-index on the next save and the tile would
+     show every value of the base device instead (#1309). Live Domoticz
+     lookups still need the base device, see _customSubdevice(). */
+  function _isCustomSubdeviceIdx(idx) {
+    return typeof idx === 'string' && /^[1-9][0-9]*_[1-9][0-9]*$/.test(idx);
+  }
+  function _customSubdevice(idx) {
+    return _isCustomSubdeviceIdx(idx) ? _parseCk(idx) : null;
+  }
+
+  /* 's<idx>' references a Domoticz group/scene (docs/blocks/domoticzblocks.rst
+     and docs/blocks/specials/group.rst). Keep it as written: a bare number
+     means a device idx elsewhere (for example js/devicerules.js), so turning
+     's12' into 12 would quietly point Automation at device 12. */
+  function _isSceneIdx(idx) {
+    return typeof idx === 'string' && /^[sS][1-9][0-9]*$/.test(idx);
+  }
+  function _normalizeSceneIdx(idx) {
+    return 's' + idx.slice(1);
+  }
+
+  /* The idx a special block keeps while it is edited. Custom devices and
+     Groups keep their documented string forms as written (see the helpers
+     above): parseInt() would silently change what the block points at on
+     the next save. */
+  function _specialIdx(kind, idx) {
+    if (IDX_LESS_SPECIAL_KINDS.indexOf(kind) > -1) return null;
+    if (kind === 'group') {
+      if (_isSceneIdx(idx)) return _normalizeSceneIdx(idx);
+      return parseInt(idx, 10) > 0 ? parseInt(idx, 10) : null;
+    }
+    if (kind === 'custom') {
+      if (_isCustomVariableIdx(idx)) return _normalizeCustomVariableIdx(idx);
+      if (_isCustomSubdeviceIdx(idx)) return idx;
+      if (_isSceneIdx(idx)) return _normalizeSceneIdx(idx);
+    }
+    return parseInt(idx, 10);
+  }
+
+  /* A block without a last_update property of its own follows the global
+     settings['last_update'] (js/blocks.js showUpdateInformation()); a Dial
+     shows it by default (js/components/dial.js defaultCfg). Such a block is
+     read as inherited: its toggle shows what the tile really does, and it is
+     saved without the property until the toggle is changed. Reading it as
+     false wrote last_update:false on every save, which silently removed the
+     last update time from tiles nobody had edited. */
+  function _lastUpdateOptions(definition) {
+    var inherited =
+      !definition || typeof definition.last_update === 'undefined';
+    var isDial =
+      !!definition && String(definition.type || '').toLowerCase() === 'dial';
+    return {
+      last_update: inherited
+        ? isDial || !!settings['last_update']
+        : !!definition.last_update,
+      last_update_inherited: inherited,
+    };
+  }
+
+  /* F1 originally shipped as the two singleton catalog widgets
+     widget_f1/type:'f1' and widget_f1events/type:'f1events', with their
+     options stored globally in settings. Keep those blocks editable and
+     migrate them to the repeatable per-block shape the next time the screen
+     is saved. Without this bridge, adding a second F1 block silently omitted
+     the existing legacy one from the rebuilt screen configuration. */
+  function _normaliseLegacyF1Definition(definition) {
+    var type = String((definition && definition.type) || '').toLowerCase();
+    if (type !== 'f1' && type !== 'f1events') return definition;
+
+    var normalised = $.extend({}, definition);
+    if (!normalised.f1mode) {
+      normalised.f1mode = type === 'f1events' ? 'all' : 'next';
+    }
+    var legacySettings = {
+      f1language: 'f1_language',
+      f1urlen: 'f1_url_en',
+      f1urlnl: 'f1_url_nl',
+      f1utcoffset: 'f1_utcoffset',
+      f1pollminutes: 'f1_pollminutes',
+      f1sessions: 'f1_sessions',
+      f1visibility: 'f1_visibility',
+      f1emptytext: 'f1_emptytext',
+      hideimageonempty: 'f1_hideimageonempty',
+      f1fontsize: 'f1_fontsize',
+    };
+    Object.keys(legacySettings).forEach(function (blockField) {
+      var settingField = legacySettings[blockField];
+      if (
+        typeof normalised[blockField] === 'undefined' &&
+        typeof settings !== 'undefined' &&
+        typeof settings[settingField] !== 'undefined'
+      ) {
+        normalised[blockField] = settings[settingField];
+      }
+    });
+    return normalised;
   }
 
   /* Recognise editor-created dummy and title blocks without treating every
@@ -847,7 +1017,12 @@ var DashticzDeviceEditor = (function () {
         definition.type === 'dial' ||
         definition.type === 'bar' ||
         definition.type === reference) &&
-      (parseInt(definition.idx, 10) > 0 || _isCustomVariableIdx(definition.idx))
+      (parseInt(definition.idx, 10) > 0 ||
+        _isCustomVariableIdx(definition.idx) ||
+        // A scene under a hand-picked key. A block stored under its own
+        // scene key ('s5', which the runtime stamps with idx: 's5') stays
+        // the plain scene device it has always been.
+        (_isSceneIdx(definition.idx) && !_isSceneIdx(reference)))
     ) {
       // A device with a hand-picked block key is a Custom device. Recognising
       // it before the normal IDX path preserves that key on later editor saves.
@@ -869,6 +1044,16 @@ var DashticzDeviceEditor = (function () {
       // not the plain Domoticz Group/Scene device the normal Add device dropdown
       // already offers.
       kind = 'group';
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
+      String(definition.type || '').toLowerCase() === 'cluster'
+    ) {
+      // Cluster (js/components/cluster.js): a fixed list of devices shown
+      // as individually-switchable rows in one block, dispatched on
+      // type: 'cluster' like Group's type: 'group' just above. Always has
+      // a devices array (no optional idx like Group), validated by
+      // saveblocks.php's own 'cluster' branch.
+      kind = 'cluster';
     } else if (
       /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
       !definition.type &&
@@ -898,19 +1083,26 @@ var DashticzDeviceEditor = (function () {
       /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
       reference !== 'widget_calendar' &&
       String(definition.type || '').toLowerCase() !== 'calendar' &&
-      typeof definition.icalurl === 'string' &&
-      definition.icalurl !== ''
+      ((typeof definition.icalurl === 'string' && definition.icalurl !== '') ||
+        (definition.icalurl &&
+          typeof definition.icalurl === 'object' &&
+          !Array.isArray(definition.icalurl) &&
+          Object.keys(definition.icalurl).length > 0))
     ) {
       // Repeatable Calendar block, added via the Screen Editor's own "Add
       // items" -> Calendar quick-add popup (_showCalendarPopup() above)
       // rather than the Widgets catalog's singleton 'calendar' entry.
       // Matches js/components/calendar.js's own canHandle(): dispatched on
       // a truthy icalurl (this popup never writes an explicit type, same
-      // convention as html/iframe above). The fixed 'widget_calendar' key,
-      // and any block with an explicit type: 'calendar' (the legacy
-      // multi-source `calendars` array shape the singleton widget itself
-      // writes), are excluded so those keep going through
-      // DashticzWidgetEditor's own (unrelated) config path unchanged.
+      // convention as html/iframe above) - a single calendar keeps icalurl
+      // as a plain string, and the popup's "+" button turns it into the
+      // name -> {ics, color} object shape once a second calendar is added,
+      // so both must be recognized here. The fixed 'widget_calendar' key,
+      // and any block with an explicit type: 'calendar' (the Widgets
+      // catalog's own singleton entry, which also stores icalurl as that
+      // same object shape but always carries this type), are excluded so
+      // those keep going through DashticzWidgetEditor's own (unrelated)
+      // config path unchanged.
       kind = 'calendar';
     } else if (
       /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
@@ -981,6 +1173,47 @@ var DashticzDeviceEditor = (function () {
       kind = 'camera';
     } else if (
       /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
+      ((typeof definition.f1mode === 'string' && definition.f1mode !== '') ||
+        /^(?:f1|f1events)$/i.test(String(definition.type || '')))
+    ) {
+      // Repeatable F1 block, added via the Widgets menu's F1 card
+      // (_showF1Popup()). Matches js/components/f1.js's own canHandle():
+      // dispatched on a truthy f1mode ('next' or 'all'), no `type` of its
+      // own, same convention as news/graph. The legacy type check keeps the
+      // original singleton widgets in the managed list until this save
+      // converts them to that new shape.
+      kind = 'f1';
+      definition = _normaliseLegacyF1Definition(definition);
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
+      definition.fullymode === 'charge'
+    ) {
+      // Repeatable Fully Kiosk block, added via the Widgets menu's Fully
+      // Kiosk card (_showFullykioskPopup()). Matches
+      // js/components/fullykiosk.js's own canHandle(): dispatched on
+      // fullymode, no `type` of its own, same convention as F1.
+      kind = 'fullykiosk';
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
+      definition.wimode === 'forecast'
+    ) {
+      // Repeatable Weather Info block, added via the Widgets menu's Weather
+      // info card (_showWeatherinfoPopup()). Matches
+      // js/components/weatherinfo.js's own canHandle(): dispatched on wimode,
+      // no `type` of its own, same convention as F1.
+      kind = 'weatherinfo';
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
+      typeof definition.tvgids === 'string' &&
+      definition.tvgids !== ''
+    ) {
+      // Repeatable TVgids block, added via the Widgets menu's TVgids card
+      // (_showTvgidsPopup()). Matches js/components/tvgids.js's own
+      // canHandle(): dispatched on a truthy tvgids (the channel list), no
+      // `type` of its own, same convention as F1.
+      kind = 'tvgids';
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference) &&
       reference !== 'widget_news' &&
       String(definition.type || '').toLowerCase() !== 'news' &&
       typeof definition.feed === 'string' &&
@@ -1026,6 +1259,7 @@ var DashticzDeviceEditor = (function () {
       kind = 'lms';
     }
     if (!kind) return null;
+    var lastUpdate = _lastUpdateOptions(definition);
     var hasConfiguredImage =
       typeof definition.image === 'string' && definition.image !== '';
     var barMode = _isBarDefinition(definition);
@@ -1036,16 +1270,7 @@ var DashticzDeviceEditor = (function () {
       orderKey: _specialOrderKey(reference),
       reference: reference,
       definition: definition,
-      idx:
-        IDX_LESS_SPECIAL_KINDS.indexOf(kind) > -1
-          ? null
-          : kind === 'group'
-            ? parseInt(definition.idx, 10) > 0
-              ? parseInt(definition.idx, 10)
-              : null
-            : kind === 'custom' && _isCustomVariableIdx(definition.idx)
-              ? _normalizeCustomVariableIdx(definition.idx)
-              : parseInt(definition.idx, 10),
+      idx: _specialIdx(kind, definition.idx),
       title:
         TITLE_OPTIONAL_SPECIAL_KINDS.indexOf(kind) > -1
           ? String(definition.title || '')
@@ -1053,12 +1278,7 @@ var DashticzDeviceEditor = (function () {
               definition.title || (kind === 'title' ? 'Title' : reference)
             ),
       width: _parseWidth(
-        definition.width ||
-          (kind === 'title'
-            ? 12
-            : WIDE_DEFAULT_SPECIAL_KINDS.indexOf(kind) > -1
-              ? 6
-              : 3)
+        definition.width || DT_function.widgetDefaultWidth(kind)
       ),
 
       height: _parseHeight(definition.height),
@@ -1108,10 +1328,16 @@ var DashticzDeviceEditor = (function () {
       // hide_data/last_update/switch are unused for a title/separator block,
       // but icon applies to every special kind.
       options: {
+        // A separator without an icon property renders without an icon
+        // (#169, js/components/blocktitle.js), so show its Icon option as
+        // off: reading it as on added fas fa-divide on the next save.
+        // A slide button without an icon property renders without one (the
+        // writer leaves an empty icon out), so it reads as off as well.
         icon:
           hasConfiguredImage ||
-          typeof definition.icon === 'undefined' ||
-          definition.icon !== '',
+          (kind === 'title' || kind === 'slidebutton'
+            ? typeof definition.icon === 'string' && definition.icon !== ''
+            : typeof definition.icon === 'undefined' || definition.icon !== ''),
         // Icon and Image are one source selector in the editor. Prefer the
         // configured image when an older block still contains both so an
         // unrelated Device Editor save also cleans up the stale icon.
@@ -1119,15 +1345,26 @@ var DashticzDeviceEditor = (function () {
           ? null
           : typeof definition.icon === 'string' && definition.icon !== ''
             ? definition.icon
-            : kind === 'title' && typeof definition.icon === 'undefined'
-              ? SEPARATOR_DEFAULT_ICON
-              : null,
+            : null,
         hide_data: definition.hide_data === true,
-        last_update: definition.last_update === true,
+        last_update: lastUpdate.last_update,
+        last_update_inherited: lastUpdate.last_update_inherited,
         switch: definition.switch === true,
         dial: definition.type === 'dial' && !barMode,
         bar: barMode,
         needle: definition.needle === true,
+        // Selector Switch "Compact" layout (js/blocks.js getSelectorSwitch()).
+        compactSelector: definition.compactSelector === true,
+        // Reverse icon dimming (js/blocks.js applyBlockIconStyle()).
+        reverseicon: definition.reverseicon === true,
+        fontsizeTitle: _parseTextFontSize(definition.fontsize_title, true),
+        fontsizeValue: _parseTextFontSize(definition.fontsize_value, true),
+        textalign: _parseTextAlign(definition.textalign),
+        textvalign: _parseTextVAlign(definition.textvalign),
+        compactIcons:
+          definition.compactIcons && typeof definition.compactIcons === 'object'
+            ? $.extend({}, definition.compactIcons)
+            : {},
         // Preserved as a real tri-state (true/false/undefined), not coerced
         // to a boolean: undefined means "not explicitly set yet", so the
         // popup can fall back to auto-detecting from the live device's
@@ -1142,7 +1379,7 @@ var DashticzDeviceEditor = (function () {
       slideTarget:
         parseInt(definition.slide, 10) > 0 ? parseInt(definition.slide, 10) : 1,
       showTitle: definition.hide_title !== true,
-      customFields: _deviceCustomFieldRows(definition, definition.title),
+      customFields: _deviceCustomFieldRows(definition, definition.title, kind),
       preservedFields: _devicePreservedFieldValues(definition),
     };
   }
@@ -1163,6 +1400,8 @@ var DashticzDeviceEditor = (function () {
     var translatedTitles = {
       weather: t.weather_title || 'Weather',
       garbage: t.garbage_title || 'Garbage',
+      postnl: t.postnl_title || 'PostNL',
+      hpilo: t.hpilo_title || 'HP iLO',
       spotify: t.spotify_title || 'Spotify',
       sonarr: t.sonarr_title || 'Sonarr',
       clock: t.clock_title || 'Clock',
@@ -1188,6 +1427,8 @@ var DashticzDeviceEditor = (function () {
     var catalog = {
       widget_weather: { id: 'weather', title: translatedTitles.weather },
       widget_garbage: { id: 'garbage', title: translatedTitles.garbage },
+      widget_postnl: { id: 'postnl', title: translatedTitles.postnl },
+      widget_hpilo: { id: 'hpilo', title: translatedTitles.hpilo },
       widget_spotify: { id: 'spotify', title: translatedTitles.spotify },
       widget_sonarr: { id: 'sonarr', title: translatedTitles.sonarr },
       widget_clock: { id: 'clock', title: translatedTitles.clock },
@@ -1239,6 +1480,8 @@ var DashticzDeviceEditor = (function () {
         weather: 'weather',
         wunderground: 'weather',
         garbage: 'garbage',
+        postnl: 'postnl',
+        hpilo: 'hpilo',
         spotify: 'spotify',
         sonarr: 'sonarr',
         calendar: 'calendar',
@@ -1345,9 +1588,24 @@ var DashticzDeviceEditor = (function () {
     // in the visual mode selector below (see _showConfigPopup), not the
     // generic custom-fields grid. Has no meaning outside subtype: 'bar'.
     barsteps: true,
-    // Lyrion Music Server (LMS) block fields - managed by the dedicated
-    // Server/Port/Username/Password/Player/Refresh/Hide-when-off section of
-    // the Lyrion Music Server popup below, not the generic custom-fields grid.
+    // Per-device text style - managed by the dedicated Text section of
+    // Device Config (see _applyTextStyleFields()).
+    fontsize_title: true,
+    fontsize_value: true,
+    textalign: true,
+    textvalign: true,
+    // Reverse icon dimming - the Reverse toggle in Display options.
+    reverseicon: true,
+    __proto__: true,
+    prototype: true,
+    constructor: true,
+  };
+
+  // Lyrion Music Server (LMS) block fields - managed by the dedicated
+  // sections of the LMS popup, not the generic custom-fields grid. They are
+  // only reserved on an LMS block (saveblocks.php does the same): on an
+  // iframe, camera or XMLTV block a field like refresh is an ordinary one.
+  var lmsOnlyCustomProperties = {
     server: true,
     port: true,
     username: true,
@@ -1355,25 +1613,20 @@ var DashticzDeviceEditor = (function () {
     player: true,
     refresh: true,
     hide_when_off: true,
-    // Title/Artist/Station text style (size/color) - managed by the
-    // dedicated Text style section of the Lyrion Music Server popup above,
-    // not the generic custom-fields grid. Without this, these six
-    // properties were double-carried: once correctly through the dedicated
-    // lmsTitleSize/etc. fields, and once more as stale generic custom-field
-    // rows (hydrated from CONFIG.js when the popup first opened and never
-    // touched again). configwriter.php's special-block-props builder
-    // unconditionally applies custom_fields last, so that stale copy
-    // silently overwrote every real edit on save (#217 follow-up).
     title_size: true,
     title_color: true,
     artist_size: true,
     artist_color: true,
     station_size: true,
     station_color: true,
-    __proto__: true,
-    prototype: true,
-    constructor: true,
   };
+
+  function _isProtectedCustomProperty(lowerProperty, kind) {
+    return !!(
+      protectedCustomDeviceProperties[lowerProperty] ||
+      (kind === 'lms' && lmsOnlyCustomProperties[lowerProperty])
+    );
+  }
 
   function _settingToText(value) {
     if (value !== null && typeof value === 'object') {
@@ -1383,7 +1636,37 @@ var DashticzDeviceEditor = (function () {
         return '';
       }
     }
-    return String(value);
+    var text = String(value);
+    if (value === '') return '""'; // an empty row would block the popup
+    if (typeof value === 'string') {
+      // A text value that would read back as another type ('007', 'true') is
+      // shown as a JSON string, so a save keeps it a string.
+      var parsed = _parseCustomSetting(text);
+      if (!parsed.valid || parsed.value !== value || /^"/.test(text)) {
+        return JSON.stringify(value);
+      }
+    }
+    return text;
+  }
+
+  // Byte length of a string once saved as UTF-8 (saveblocks.php limits bytes).
+  function _utf8Length(text) {
+    return unescape(encodeURIComponent(String(text))).length;
+  }
+
+  // Cuts text to at most `max` bytes without splitting a character, like
+  // configwriter_cut_bytes() on the server.
+  function _cutUtf8(text, max) {
+    var out = '';
+    var used = 0;
+    var chars = Array.from(String(text));
+    for (var i = 0; i < chars.length; i++) {
+      var size = _utf8Length(chars[i]);
+      if (used + size > max) break;
+      out += chars[i];
+      used += size;
+    }
+    return out;
   }
 
   function _normaliseCustomFieldName(value) {
@@ -1398,6 +1681,15 @@ var DashticzDeviceEditor = (function () {
     if (text === 'false') return { valid: true, value: false };
     if (/^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) {
       return { valid: true, value: Number(text) };
+    }
+    if (/^".*"$/.test(text)) {
+      try {
+        var quoted = JSON.parse(text);
+        if (typeof quoted === 'string') return { valid: true, value: quoted };
+      } catch (ignore) {
+        /* not a JSON string: keep the text as typed */
+      }
+      return { valid: true, value: text };
     }
     if (/^[\[{]/.test(text)) {
       try {
@@ -1429,7 +1721,7 @@ var DashticzDeviceEditor = (function () {
     return value;
   }
 
-  function _deviceCustomFieldRows(definition, titleValue) {
+  function _deviceCustomFieldRows(definition, titleValue, kind) {
     var rows = [
       {
         field: 'title',
@@ -1469,7 +1761,7 @@ var DashticzDeviceEditor = (function () {
       var lowerProperty = property.toLowerCase();
       if (
         lowerProperty === 'image' ||
-        protectedCustomDeviceProperties[lowerProperty] ||
+        _isProtectedCustomProperty(lowerProperty, kind) ||
         /^_dashticz/i.test(property)
       )
         return;
@@ -1542,9 +1834,9 @@ var DashticzDeviceEditor = (function () {
     var renderedIcon = _renderedIconForReference(reference);
     if (renderedIcon) return renderedIcon;
 
-    var parsed = special ? null : _parseCk(ck);
-    var idx = special ? special.idx : parsed.idx;
-    var subidx = special ? 0 : parsed.subidx;
+    var parsed = special ? _customSubdevice(special.idx) : _parseCk(ck);
+    var idx = parsed ? parsed.idx : special.idx;
+    var subidx = parsed ? parsed.subidx : 0;
     var devices = Domoticz.getAllDevices();
     var device = devices && (devices[String(idx)] || devices[idx]);
     if (device) return _defaultDomoticzIcon(device, subidx, idx);
@@ -1553,6 +1845,7 @@ var DashticzDeviceEditor = (function () {
       if (special.specialType === 'slidebutton') return 'fas fa-home';
       if (special.specialType === 'custom') return 'fas fa-cube';
       if (special.specialType === 'group') return 'fas fa-object-group';
+      if (special.specialType === 'cluster') return 'fas fa-list-check';
       if (special.specialType === 'html') return 'fas fa-code';
       if (special.specialType === 'iframe') return 'fas fa-window-maximize';
       if (special.specialType === 'calendar') return 'fas fa-calendar-alt';
@@ -1560,6 +1853,11 @@ var DashticzDeviceEditor = (function () {
       if (special.specialType === 'timegraph') return 'fas fa-chart-line';
       if (special.specialType === 'xmltvguide') return 'fas fa-tv';
       if (special.specialType === 'lms') return 'fas fa-music';
+      if (special.specialType === 'f1') return 'fas fa-flag-checkered';
+      if (special.specialType === 'tvgids') return 'fas fa-tv';
+      if (special.specialType === 'fullykiosk')
+        return 'fas fa-tablet-screen-button';
+      if (special.specialType === 'weatherinfo') return 'fas fa-cloud-sun-rain';
     }
     return 'fas fa-question';
   }
@@ -1599,6 +1897,49 @@ var DashticzDeviceEditor = (function () {
         .appendTo($button);
       $grid.append($button);
     });
+  }
+
+  // Per-device text style (Device Config -> Text): title/value font size in
+  // px and text alignment, applied at runtime by js/blocks.js
+  // applyBlockTextStyle(). Stored as fontsize_title/fontsize_value/textalign
+  // custom fields, like compactSelector.
+  var TEXT_ALIGN_VALUES = ['left', 'center', 'right'];
+  var TEXT_VALIGN_VALUES = ['top', 'middle', 'bottom'];
+
+  // keepOutOfRange: a stored size outside 6-100 (the components accept any
+  // positive size) is passed on as it is until the user changes the field.
+  function _parseTextFontSize(value, keepOutOfRange) {
+    var size = parseInt(value, 10);
+    if (!(size > 0)) return null;
+    return keepOutOfRange ? size : Math.min(100, Math.max(6, size));
+  }
+
+  function _parseTextAlign(value) {
+    value = String(value || '').toLowerCase();
+    return TEXT_ALIGN_VALUES.indexOf(value) > -1 ? value : '';
+  }
+
+  function _parseTextVAlign(value) {
+    value = String(value || '').toLowerCase();
+    return TEXT_VALIGN_VALUES.indexOf(value) > -1 ? value : '';
+  }
+
+  function _applyReverseIconField(customFields, options) {
+    delete customFields.reverseicon;
+    if (options.reverseicon === true) customFields.reverseicon = true;
+  }
+
+  function _applyTextStyleFields(customFields, options) {
+    delete customFields.fontsize_title;
+    delete customFields.fontsize_value;
+    delete customFields.textalign;
+    delete customFields.textvalign;
+    if (options.fontsizeTitle)
+      customFields.fontsize_title = options.fontsizeTitle;
+    if (options.fontsizeValue)
+      customFields.fontsize_value = options.fontsizeValue;
+    if (options.textalign) customFields.textalign = options.textalign;
+    if (options.textvalign) customFields.textvalign = options.textvalign;
   }
 
   function _devicePreservedFieldValues(definition) {
@@ -1687,7 +2028,7 @@ var DashticzDeviceEditor = (function () {
         'icons',
       ]);
     } else if (widget.id === 'calendar') {
-      entry.icalurl = definition.icalurl || '';
+      entry.icalurl = definition.icalurl || _legacyCalendarIcalurl(definition);
       _copyDefinedWidgetProperties(entry, definition, ['maxitems']);
     } else if (widget.id === 'clock') {
       entry.clockType = definition.type || 'basicclock';
@@ -1875,6 +2216,33 @@ var DashticzDeviceEditor = (function () {
     };
   }
 
+  // widget_* catalog keys always name a widget, also when the block has an idx.
+  function _catalogWidgetFromReference(reference) {
+    return typeof reference === 'string' && /^widget_/.test(reference)
+      ? _widgetFromReference(reference)
+      : null;
+  }
+
+  // The old calendars: [{calendar: {icalurl}, color}] form of a Calendar
+  // widget, as js/components/calendar.js converts it, so that saving the
+  // screen does not fail on a widget without icalurl.
+  function _legacyCalendarIcalurl(definition) {
+    var result = {};
+    var count = 0;
+    var legacy = definition && definition.calendars;
+    if (!Array.isArray(legacy)) return '';
+    legacy.forEach(function (item, index) {
+      var ics = item && item.calendar && item.calendar.icalurl;
+      if (typeof ics !== 'string' || !ics) return;
+      result['calendar' + index] = {
+        ics: ics,
+        color: (item && item.color) || 'white',
+      };
+      count++;
+    });
+    return count ? result : '';
+  }
+
   function _getAllManagedGridItems() {
     var ordered = [];
     var seen = {};
@@ -1887,18 +2255,34 @@ var DashticzDeviceEditor = (function () {
           typeof blocks !== 'undefined' && blocks[reference]
             ? blocks[reference]
             : null;
-        if (!definition) return;
         var grid = {
           x: _gridValue(this, '--dt-grid-x', 1),
           y: _gridValue(this, '--dt-grid-y', index + 1),
           w: _gridValue(this, '--dt-grid-w', 1),
           h: _gridValue(this, '--dt-grid-h', 1),
         };
+        if (!definition) {
+          // A tile without a blocks[] definition stays on the grid as it is.
+          if (reference) gridExtras.push({ ref: reference, grid: grid });
+          return;
+        }
         var special = _specialFromReference(reference);
-        if (special && !seen[special.orderKey]) {
-          seen[special.orderKey] = true;
-          special.grid = grid;
-          ordered.push(special);
+        if (special) {
+          if (!seen[special.orderKey]) {
+            seen[special.orderKey] = true;
+            special.grid = grid;
+            ordered.push(special);
+          }
+          return;
+        }
+        var catalogWidget = _catalogWidgetFromReference(reference);
+        if (catalogWidget) {
+          if (!seen[catalogWidget.orderKey]) {
+            seen[catalogWidget.orderKey] = true;
+            catalogWidget.reference = reference;
+            catalogWidget.grid = grid;
+            ordered.push(catalogWidget);
+          }
           return;
         }
         var ck = _toCompositeKey(definition);
@@ -1966,44 +2350,55 @@ var DashticzDeviceEditor = (function () {
 
     var columnKeys = [];
     var $activeScreen = _activeScreenDom();
-    $activeScreen.find('[data-colindex]').each(function () {
-      var columnKey = String($(this).attr('data-colindex'));
+    var standbyScreen = _activeScreenTarget() === 'standby';
+    function addColumnKey(rawKey) {
+      var columnKey = String(rawKey);
+      // The topbar column is not managed by the editor.
+      if (columnKey === 'bar') return;
+      // The standby DOM prefixes its columns with 'standby'; columns_standby
+      // does not, so strip it before looking for duplicates.
+      if (standbyScreen) columnKey = columnKey.replace(/^standby/, '');
       if (columnKeys.indexOf(columnKey) < 0) {
         columnKeys.push(columnKey);
       }
+    }
+    $activeScreen.find('[data-colindex]').each(function () {
+      addColumnKey($(this).attr('data-colindex'));
     });
 
     // Standby uses columns_standby, not screens[].
     if (_activeScreenTarget() === 'standby') {
       if (typeof columns_standby !== 'undefined' && columns_standby) {
-        Object.keys(columns_standby).forEach(function (colKey) {
-          if (columnKeys.indexOf(String(colKey)) < 0) {
-            columnKeys.push(String(colKey));
-          }
-        });
+        Object.keys(columns_standby).forEach(addColumnKey);
       }
     }
 
     columnKeys.forEach(function (colKey) {
       var lookupKey = String(colKey);
-      if (_activeScreenTarget() === 'standby' && /^standby/.test(lookupKey)) {
-        lookupKey = lookupKey.replace(/^standby/, '');
-      }
       var col =
-        _activeScreenTarget() === 'standby' &&
+        standbyScreen &&
         typeof columns_standby !== 'undefined' &&
         columns_standby[lookupKey]
           ? columns_standby[lookupKey]
-          : columns[colKey];
-      if (!col && typeof columns !== 'undefined') {
-        col = columns[lookupKey];
-      }
+          : columns[standbyScreen ? 'standby' + lookupKey : lookupKey];
       if (col && Array.isArray(col.blocks)) {
         col.blocks.forEach(function (b) {
           var special = _specialFromReference(b);
-          if (special && !seen[special.orderKey]) {
-            seen[special.orderKey] = true;
-            ordered.push(special);
+          if (special) {
+            if (!seen[special.orderKey]) {
+              seen[special.orderKey] = true;
+              ordered.push(special);
+            }
+            return;
+          }
+          // A catalog widget (widget_timegraph carries an idx) is a widget,
+          // not a device.
+          var catalogWidget = _catalogWidgetFromReference(b);
+          if (catalogWidget) {
+            if (!seen[catalogWidget.orderKey]) {
+              seen[catalogWidget.orderKey] = true;
+              ordered.push(catalogWidget);
+            }
             return;
           }
           var ck = _toCompositeKey(b);
@@ -2034,6 +2429,23 @@ var DashticzDeviceEditor = (function () {
           if (widget && !seen[widget.orderKey]) {
             seen[widget.orderKey] = true;
             ordered.push(widget);
+            return;
+          }
+          // Anything else that is declared in blocks[] (a second clock, a
+          // component of its own) is carried along unchanged. The standby
+          // screen has its own path (_preserveStandbyExtraBlocks).
+          if (
+            !standbyScreen &&
+            typeof b === 'string' &&
+            typeof blocks !== 'undefined' &&
+            blocks[b] &&
+            !seen['extra:' + b]
+          ) {
+            seen['extra:' + b] = true;
+            columnExtras.push({
+              ref: b,
+              width: _parseWidth(blocks[b].width),
+            });
           }
         });
       }
@@ -2157,6 +2569,7 @@ var DashticzDeviceEditor = (function () {
         return;
       }
       var configured = _getConfiguredBlockForCk(ck) || {};
+      var configuredLastUpdate = _lastUpdateOptions(configured);
       var barMode = _isBarDefinition(configured);
       deviceTitles[ck] = configured._dashticzAutoTitle
         ? ''
@@ -2173,11 +2586,23 @@ var DashticzDeviceEditor = (function () {
             ? configured.icon
             : null,
         hide_data: configured.hide_data === true,
-        last_update: configured.last_update === true,
+        last_update: configuredLastUpdate.last_update,
+        last_update_inherited: configuredLastUpdate.last_update_inherited,
         switch: configured.switch === true,
         dial: configured.type === 'dial' && !barMode,
         bar: barMode,
         needle: configured.needle === true,
+        // Selector Switch "Compact" layout (js/blocks.js getSelectorSwitch()).
+        compactSelector: configured.compactSelector === true,
+        reverseicon: configured.reverseicon === true,
+        fontsizeTitle: _parseTextFontSize(configured.fontsize_title, true),
+        fontsizeValue: _parseTextFontSize(configured.fontsize_value, true),
+        textalign: _parseTextAlign(configured.textalign),
+        textvalign: _parseTextVAlign(configured.textvalign),
+        compactIcons:
+          configured.compactIcons && typeof configured.compactIcons === 'object'
+            ? $.extend({}, configured.compactIcons)
+            : {},
         // See the analogous comment in _specialFromReference() - kept as a
         // tri-state, not coerced to a boolean.
         inverse: configured.inverse,
@@ -2194,7 +2619,57 @@ var DashticzDeviceEditor = (function () {
       devicePreservedFields[ck] = _devicePreservedFieldValues(configured);
     });
 
+    if (layoutEditorBaseline && layoutEditorBaselineState === null) {
+      layoutEditorBaselineState = _graftSignature(layoutEditorBaseline);
+    }
     return { available: available, allDomoticz: allDomoticz };
+  }
+
+  // Everything the editor holds for these items (width, height, title,
+  // options, custom fields...), to see whether an existing item was edited.
+  function _graftSignature(orderKeys) {
+    try {
+      return JSON.stringify(
+        orderKeys.map(function (orderKey) {
+          if (orderKey.indexOf('device:') === 0) {
+            var ck = orderKey.slice(7);
+            return [
+              deviceWidths[ck],
+              deviceHeights[ck],
+              deviceTitles[ck],
+              deviceOptions[ck],
+              deviceCustomFields[ck],
+              deviceTitleVisible[ck],
+              devicePreservedFields[ck],
+            ];
+          }
+          if (orderKey.indexOf('widget:') === 0) {
+            return [
+              widgetWidths[orderKey],
+              widgetHeights[orderKey],
+              widgetTitles[orderKey],
+              widgetOptions[orderKey],
+              widgetTitleVisible[orderKey],
+              managedWidgets[orderKey] &&
+                managedWidgets[orderKey].pendingPayload,
+            ];
+          }
+          var special = managedSpecials[orderKey];
+          return special
+            ? [
+                special.width,
+                special.height,
+                special.title,
+                special.options,
+                special.customFields,
+                special.showTitle,
+              ]
+            : null;
+        })
+      );
+    } catch (ignore) {
+      return 'unreadable:' + Math.random();
+    }
   }
 
   function _buildAndShowModal() {
@@ -2365,9 +2840,13 @@ var DashticzDeviceEditor = (function () {
           _esc(t.field) +
           '"><option value="icon"' +
           (lowerField === 'icon' ? ' selected' : '') +
-          '>Icon</option><option value="image"' +
+          '>' +
+          _esc(t.icon) +
+          '</option><option value="image"' +
           (lowerField === 'image' ? ' selected' : '') +
-          '>Image</option></select>'
+          '>' +
+          _esc(t.image) +
+          '</option></select>'
         : '<input type="text" class="form-control de-custom-field-name" placeholder="' +
           _esc(t.field) +
           '" value="' +
@@ -2465,10 +2944,12 @@ var DashticzDeviceEditor = (function () {
       _esc(t.custom_device_name_help) +
       '</div></div>';
     html +=
-      '<div class="mb-3"><label class="form-label" for="cd-device-idx">IDX</label>';
+      '<div class="mb-3"><label class="form-label" for="cd-device-idx">' +
+      _esc(t.custom_device_idx) +
+      '</label>';
     html +=
       '<input type="text" inputmode="numeric" class="form-control" ' +
-      'id="cd-device-idx" placeholder="123, or v3 for a variable">';
+      'id="cd-device-idx" placeholder="123, s3 or v3">';
     html +=
       '<div class="form-text">' +
       _esc(t.custom_device_idx_help) +
@@ -2538,9 +3019,14 @@ var DashticzDeviceEditor = (function () {
       var reference = $.trim(String($('#cd-device-name').val() || ''));
       var rawIdx = $.trim(String($('#cd-device-idx').val() || ''));
       var isVariableIdx = _isCustomVariableIdx(rawIdx);
+      // docs/wizard/specialblocks.rst documents 's<idx>' (a group or scene)
+      // for this field too; the rest of the editor already keeps that form.
+      var isSceneIdx = _isSceneIdx(rawIdx);
       var idx = isVariableIdx
         ? _normalizeCustomVariableIdx(rawIdx)
-        : parseInt(rawIdx, 10);
+        : isSceneIdx
+          ? _normalizeSceneIdx(rawIdx)
+          : parseInt(rawIdx, 10);
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
         $message.addClass('text-danger').text(t.invalid_custom_device_name);
         $('#cd-device-name').trigger('focus');
@@ -2554,14 +3040,18 @@ var DashticzDeviceEditor = (function () {
         $('#cd-device-name').trigger('focus');
         return;
       }
-      if (!isVariableIdx && !(idx > 0 && String(idx) === rawIdx)) {
+      if (
+        !isVariableIdx &&
+        !isSceneIdx &&
+        !(idx > 0 && String(idx) === rawIdx)
+      ) {
         $message.addClass('text-danger').text(t.invalid_idx);
         $('#cd-device-idx').trigger('focus');
         return;
       }
 
-      var title = $.trim(String($('#cd-device-title').val() || '')).slice(
-        0,
+      var title = _cutUtf8(
+        $.trim(String($('#cd-device-title').val() || '')),
         100
       );
       var customRows = [];
@@ -2668,9 +3158,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('customdevicepopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('customdevicepopup'));
       _save();
     });
 
@@ -2692,18 +3182,28 @@ var DashticzDeviceEditor = (function () {
   function _multiDeviceRowHtml(row) {
     var t = _translations();
     row = row || { idx: '', value: '' };
+    // A hand-written row can hold more than idx and value (title, unit...);
+    // the whole row is kept so a save writes it back.
+    var original = '';
+    try {
+      original = JSON.stringify(row);
+    } catch (ignore) {
+      original = '';
+    }
     return (
-      '<div class="md-value-row input-group input-group-sm mb-2">' +
-      '<input type="number" min="1" step="1" class="form-control md-value-idx" ' +
+      '<div class="md-value-row input-group input-group-sm mb-2" data-md-original="' +
+      _esc(original) +
+      '">' +
+      '<input type="text" class="form-control md-value-idx" ' +
       'style="max-width:110px" placeholder="' +
       _esc(t.multi_device_row_idx) +
       '" value="' +
-      _esc(row.idx || '') +
+      _esc(row.idx === undefined || row.idx === null ? '' : row.idx) +
       '">' +
       '<input type="text" class="form-control md-value-value" placeholder="' +
       _esc(t.multi_device_row_value) +
       '" value="' +
-      _esc(row.value || '') +
+      _esc(row.value === undefined || row.value === null ? '' : row.value) +
       '">' +
       '<button type="button" class="btn btn-outline-success md-value-add" title="' +
       _esc(t.add_value_row) +
@@ -2939,7 +3439,7 @@ var DashticzDeviceEditor = (function () {
     var backRequested = false;
     $popup.on('click', '.de-back-btn', function () {
       backRequested = true;
-      window.bootstrap.Modal.getInstance(popup).hide();
+      _hideModal(popup);
     });
     $popup.one('hidden.bs.modal', function () {
       if (
@@ -3065,7 +3565,10 @@ var DashticzDeviceEditor = (function () {
       var reference = $.trim(String($('#md-device-name').val() || ''));
       var rawIdx = $.trim(String($('#md-device-idx').val() || ''));
       var idx = parseInt(rawIdx, 10);
-      var title = $.trim(String($('#md-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#md-device-title').val() || '')),
+        100
+      );
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
         $message.addClass('text-danger').text(t.invalid_multi_device_name);
         $('#md-device-name').trigger('focus');
@@ -3170,9 +3673,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('multidevicepopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('multidevicepopup'));
       _save();
     });
 
@@ -3268,7 +3771,10 @@ var DashticzDeviceEditor = (function () {
         .removeClass('text-danger')
         .text('');
       var reference = $.trim(String($('#gb-device-name').val() || ''));
-      var title = $.trim(String($('#gb-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#gb-device-title').val() || '')),
+        100
+      );
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
         $message.addClass('text-danger').text(t.invalid_group_name);
         $('#gb-device-name').trigger('focus');
@@ -3368,9 +3874,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('groupblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('groupblockpopup'));
       _save();
     });
 
@@ -3379,6 +3885,916 @@ var DashticzDeviceEditor = (function () {
     });
     window.bootstrap.Modal.getOrCreateInstance(
       document.getElementById('groupblockpopup')
+    ).show();
+  }
+
+  // Cluster device picker markup, shared between the quick-add popup
+  // (_showClusterPopup) and the generic Device Config popup's own Cluster
+  // section (_showConfigPopup's isClusterBlock branch), so adding/removing
+  // rows looks and behaves identically whether creating or editing.
+  function _clusterDeviceOptionsHtml(t, deviceList, pendingDevices) {
+    var picked = {};
+    pendingDevices.forEach(function (d) {
+      picked[d.idx] = true;
+    });
+    var html = '<option value="">— ' + _esc(t.select_item) + ' —</option>';
+    deviceList.forEach(function (d) {
+      if (picked[d.idx]) return;
+      html +=
+        '<option value="' +
+        _esc(d.idx) +
+        '" data-name="' +
+        _esc(d.plainName || d.name) +
+        '">' +
+        _esc(d.name) +
+        ' (IDX ' +
+        _esc(d.idx) +
+        ')</option>';
+    });
+    return html;
+  }
+
+  // Icons a Cluster row can show in front of its name (Font Awesome, free
+  // set) - the same look as the HP iLO widget's rows. A row's icon setting
+  // is '' (none, the default for existing clusters), 'auto' (chosen by
+  // js/components/cluster.js from the device's own type) or one of these.
+  var CLUSTER_ICON_PRESETS = [
+    ['fas fa-lightbulb', 'Light'],
+    ['fas fa-plug', 'Plug'],
+    ['fas fa-power-off', 'Power'],
+    ['fas fa-toggle-on', 'Toggle'],
+    ['fas fa-thermometer-half', 'Temperature'],
+    ['fas fa-droplet', 'Humidity'],
+    ['fas fa-wind', 'Wind'],
+    ['fas fa-cloud-rain', 'Rain'],
+    ['fas fa-sun', 'Sun / lux'],
+    ['fas fa-bolt', 'Energy'],
+    ['fas fa-gauge-high', 'Gauge'],
+    ['fas fa-fan', 'Fan'],
+    ['fas fa-fire', 'Heating'],
+    ['fas fa-snowflake', 'Cooling'],
+    ['fas fa-clock', 'Clock'],
+    ['fas fa-heart-pulse', 'Health'],
+    ['fas fa-server', 'Server'],
+    ['fas fa-hard-drive', 'Storage'],
+    ['fas fa-microchip', 'Chip'],
+    ['fas fa-wifi', 'Network'],
+    ['fas fa-battery-full', 'Battery'],
+    ['fas fa-door-open', 'Door'],
+    ['fas fa-lock', 'Lock'],
+    ['fas fa-bell', 'Bell'],
+    ['fas fa-person-walking', 'Motion'],
+    ['fas fa-car', 'Car'],
+    ['fas fa-house', 'House'],
+    ['fas fa-circle-info', 'Info'],
+  ];
+
+  // The icon pull-down of one pending row: a button with the current icon
+  // and a panel of icon-only choices (names as tooltip), like the compact
+  // selector's per-level icon picker.
+  function _clusterIconPickerHtml(t, d) {
+    var current = String(d.icon || '');
+    var button =
+      current === ''
+        ? _esc(t.cluster_icon_none)
+        : current === 'auto'
+          ? _esc(t.cluster_icon_auto)
+          : '<i class="' + _esc(current) + '" aria-hidden="true"></i>';
+    var html =
+      '<span class="cl-icon-wrap" style="position:relative;flex:0 0 auto;">' +
+      '<button type="button" class="btn btn-outline-secondary btn-sm cl-icon-toggle" data-idx="' +
+      _esc(d.idx) +
+      '" aria-haspopup="true" title="' +
+      _esc(t.cluster_icon) +
+      '" style="min-width:3.5em;">' +
+      button +
+      ' <span aria-hidden="true">&#9662;</span></button>' +
+      '<span class="cl-icon-panel d-none" style="position:absolute;top:100%;right:0;z-index:1060;width:max-content;min-width:4em;max-height:260px;overflow-x:hidden;overflow-y:auto;padding:4px;margin-top:2px;border:1px solid rgba(128,128,128,.5);border-radius:6px;background:var(--bs-body-bg,#fff);box-shadow:0 4px 12px rgba(0,0,0,.35);">';
+    [
+      ['', t.cluster_icon_none],
+      ['auto', t.cluster_icon_auto],
+    ].forEach(function (choice) {
+      html +=
+        '<button type="button" class="btn btn-sm d-block w-100 text-center cl-icon-choice' +
+        (current === choice[0] ? ' active' : '') +
+        '" data-idx="' +
+        _esc(d.idx) +
+        '" data-icon="' +
+        choice[0] +
+        '">' +
+        _esc(choice[1]) +
+        '</button>';
+    });
+    CLUSTER_ICON_PRESETS.forEach(function (p) {
+      html +=
+        '<button type="button" class="btn btn-sm d-block w-100 text-center cl-icon-choice' +
+        (current === p[0] ? ' active' : '') +
+        '" data-idx="' +
+        _esc(d.idx) +
+        '" data-icon="' +
+        _esc(p[0]) +
+        '" title="' +
+        _esc(p[1]) +
+        '" aria-label="' +
+        _esc(p[1]) +
+        '"><i class="' +
+        _esc(p[0]) +
+        '" aria-hidden="true"></i></button>';
+    });
+    return html + '</span></span>';
+  }
+
+  // Drag the device rows into the order they are shown in. The list element
+  // itself is kept when the rows are re-rendered, so this is wired once;
+  // getList/setList give access to the (re-assignable) pending device array.
+  function _wireClusterSort($list, getList, setList) {
+    if (!$.fn.sortable) return;
+    $list.sortable({
+      items: '.cl-pending-item',
+      handle: '.cl-pending-handle',
+      axis: 'y',
+      tolerance: 'pointer',
+      containment: 'parent',
+      update: function () {
+        var current = getList();
+        var sorted = [];
+        $list.find('.cl-pending-item').each(function () {
+          var idx = parseInt($(this).attr('data-idx'), 10);
+          var found = current.find(function (d) {
+            return d.idx === idx;
+          });
+          if (found) sorted.push(found);
+        });
+        if (sorted.length === current.length) setList(sorted);
+      },
+    });
+  }
+
+  function _clusterPendingListHtml(t, pendingDevices, usageList) {
+    if (!pendingDevices.length) {
+      return '<div class="de-empty">' + _esc(t.cluster_no_devices) + '</div>';
+    }
+    return pendingDevices
+      .map(function (d) {
+        var usageSelect =
+          usageList && usageList.length
+            ? '<select class="form-select form-select-sm cl-usage-select" data-idx="' +
+              _esc(d.idx) +
+              '" title="' +
+              _esc(t.cluster_usage) +
+              '">' +
+              _clusterUsageOptionsHtml(
+                t,
+                usageList,
+                d.name,
+                d.usageIdx || null
+              ) +
+              '</select>'
+            : '';
+        return (
+          '<div class="de-device-item cl-pending-item" data-idx="' +
+          _esc(d.idx) +
+          '">' +
+          '<span class="cl-pending-handle de-parts-handle" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>' +
+          '<span class="cl-pending-name-group">' +
+          '<input type="text" class="form-control form-control-sm cl-name-input" data-idx="' +
+          _esc(d.idx) +
+          '" value="' +
+          _esc(d.title || '') +
+          '" placeholder="' +
+          _esc(d.name) +
+          '" title="' +
+          _esc(t.cluster_row_name) +
+          '">' +
+          '<span class="cl-pending-idx">IDX ' +
+          _esc(d.idx) +
+          '</span>' +
+          '</span>' +
+          _clusterIconPickerHtml(t, d) +
+          usageSelect +
+          '<button type="button" class="btn btn-danger btn-sm cl-remove-btn ms-auto" data-idx="' +
+          _esc(d.idx) +
+          '" title="' +
+          _esc(t.remove) +
+          '"><i class="fas fa-minus" aria-hidden="true"></i></button>' +
+          '</div>'
+        );
+      })
+      .join('');
+  }
+
+  // Excludes Groups/Scenes (idx-less devices, not a plain integer idx a
+  // cluster row can switch) and sub-devices (e.g. a TempHumBar's 3 separate
+  // data channels, which all share their parent's numeric idx - offering
+  // each as a separately "addable" option would let two rows end up
+  // pointing at the exact same device, and a sub-device isn't independently
+  // switchable in the first place). Otherwise restricted to Domoticz
+  // SwitchTypes with a genuine binary on/off state: plain 'On/Off'
+  // switches, and Dimmers - a cluster row only ever exposes the toggle
+  // (js/components/cluster.js's switchRowHtml() never renders a brightness
+  // slider), so a Dimmer here behaves exactly like a plain switch, same as
+  // clicking its icon (not its slider) on a normal device tile. SwitchType
+  // Blinds/Selectors/etc. are still excluded - those don't have a plain
+  // on/off semantic (Blinds is Open/Close/Stop, Selectors are named
+  // levels), so offering them as "addable" wouldn't actually behave like a
+  // toggle the way Dimmer does.
+  function _clusterAvailableDeviceList() {
+    var allDevices = Domoticz.getAllDevices();
+    return _getAvailableDevices(managedDevices).filter(function (d) {
+      if (_isGroupCk(d.key) || d.subidx) return false;
+      var live = allDevices[d.idx];
+      return (
+        !!live && (live.SwitchType === 'On/Off' || live.SwitchType === 'Dimmer')
+      );
+    });
+  }
+
+  // Candidate list for a row's optional companion "consumption" device.
+  // Many switches (Shelly/Zigbee2MQTT/Sonoff plugs, etc.) report their
+  // wattage through a SEPARATE Domoticz device rather than a field on the
+  // switch itself - Domoticz's own Type: 'Usage', or Type: 'General' with
+  // SubType: 'kWh' (a combined current-usage + cumulative-energy meter,
+  // js/blocktypes.js's SubType.kWh). There is no reliable idx relationship
+  // between a switch and its companion device (some gateways happen to
+  // create it at switch idx + 1, but that's a gateway convention, not a
+  // Domoticz guarantee), so this is picked per row, not auto-detected.
+  function _clusterUsageDeviceList() {
+    var allDevices = Domoticz.getAllDevices();
+    var list = [];
+    Object.keys(allDevices).forEach(function (key) {
+      if (!key || key[0] === '_') return;
+      var idx = parseInt(key, 10);
+      if (!(idx > 0 && String(idx) === key)) return;
+      var d = allDevices[key];
+      var isUsage =
+        d.Type === 'Usage' || (d.Type === 'General' && d.SubType === 'kWh');
+      if (!isUsage) return;
+      list.push({ idx: idx, name: d.Name || 'Device ' + idx });
+    });
+    return list;
+  }
+
+  // Sorts usage-device candidates so ones whose name shares the longest
+  // prefix with the switch's own name come first (e.g. "Shelly -
+  // shellyswitch-55C83E-1" -> "Shelly - shellyswitch-55C83E-energy") - most
+  // gateways name a switch and its companion energy device with a shared
+  // prefix, so this is a helpful default ordering, not a strict filter.
+  function _clusterSortUsageCandidates(candidates, switchName) {
+    var name = String(switchName || '').toLowerCase();
+    function commonPrefixLength(otherName) {
+      var other = String(otherName || '').toLowerCase();
+      var max = Math.min(name.length, other.length);
+      var i = 0;
+      while (i < max && name[i] === other[i]) i++;
+      return i;
+    }
+    return candidates
+      .map(function (c) {
+        return { device: c, score: commonPrefixLength(c.name) };
+      })
+      .sort(function (a, b) {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.device.name.localeCompare(b.device.name);
+      })
+      .map(function (c) {
+        return c.device;
+      });
+  }
+
+  // <option> list for one row's companion-device <select>, sorted by name
+  // match to that row's own switch (see _clusterSortUsageCandidates above).
+  function _clusterUsageOptionsHtml(t, usageList, switchName, selectedIdx) {
+    var sorted = _clusterSortUsageCandidates(usageList, switchName);
+    var html = '<option value="">' + _esc(t.cluster_usage_none) + '</option>';
+    sorted.forEach(function (d) {
+      html +=
+        '<option value="' +
+        _esc(d.idx) +
+        '"' +
+        (selectedIdx === d.idx ? ' selected' : '') +
+        '>' +
+        _esc(d.name) +
+        ' (IDX ' +
+        _esc(d.idx) +
+        ')</option>';
+    });
+    return html;
+  }
+
+  // Candidate list for Temperature mode: plain temperature-reporting
+  // devices (Domoticz Type 'Temp', or one of the Temp+Humidity/Baro combo
+  // types js/blocktypes.js groups under the same THB display shape),
+  // picked directly by their own idx - unlike the switch picker, this does
+  // NOT go through _getAvailableDevices()'s sub-value expansion (a
+  // Temp+Humidity+Baro device has 3 Dashticz "sub-values", which would
+  // otherwise hide the whole device behind three un-offerable idx_1/2/3
+  // entries): a Cluster row here reads a device's own .Temp field directly
+  // off its single base idx. Like _clusterUsageDeviceList(), does not
+  // exclude devices already used elsewhere on the current screen.
+  function _clusterTemperatureDeviceList() {
+    var TEMP_TYPES = {
+      Temp: true,
+      'Temp + Humidity': true,
+      'Temp + Baro': true,
+      'Temp + Humidity + Baro': true,
+    };
+    var allDevices = Domoticz.getAllDevices();
+    var list = [];
+    Object.keys(allDevices).forEach(function (key) {
+      if (!key || key[0] === '_') return;
+      var idx = parseInt(key, 10);
+      if (!(idx > 0 && String(idx) === key)) return;
+      var d = allDevices[key];
+      if (!TEMP_TYPES[d.Type]) return;
+      list.push({ idx: idx, name: d.Name || 'Device ' + idx });
+    });
+    return list;
+  }
+
+  // Candidate list for Other ("Overige") mode: every device that is neither
+  // a switch (Domoticz reports a SwitchType for all of those: On/Off,
+  // Dimmer, Blinds, Selector, Security, ...) nor a temperature reading
+  // (see _clusterTemperatureDeviceList()) - humidity, wind, rain, lux,
+  // energy meters, text/alert devices, thermostat setpoints, and so on.
+  // Each row shows the device's own Data value. Like the temperature list
+  // it is picked by base idx, without _getAvailableDevices()'s sub-value
+  // expansion.
+  function _clusterOtherDeviceList() {
+    var allDevices = Domoticz.getAllDevices();
+    var temperatureIdx = {};
+    _clusterTemperatureDeviceList().forEach(function (d) {
+      temperatureIdx[d.idx] = true;
+    });
+    var list = [];
+    Object.keys(allDevices).forEach(function (key) {
+      if (!key || key[0] === '_') return;
+      var idx = parseInt(key, 10);
+      if (!(idx > 0 && String(idx) === key)) return;
+      var d = allDevices[key];
+      if (d.SwitchType || temperatureIdx[idx]) return;
+      list.push({ idx: idx, name: d.Name || 'Device ' + idx });
+    });
+    return list;
+  }
+
+  // Row type -> candidate device list / help text. Switch is the default
+  // (mode '' or absent); Temperature and Other are the two sensor-style
+  // rows without a toggle.
+  function _clusterDeviceListForMode(mode) {
+    return mode === 'temperature'
+      ? _clusterTemperatureDeviceList()
+      : mode === 'other'
+        ? _clusterOtherDeviceList()
+        : _clusterAvailableDeviceList();
+  }
+
+  function _clusterHelpTextForMode(t, mode) {
+    return mode === 'temperature'
+      ? t.cluster_devices_help_temperature
+      : mode === 'other'
+        ? t.cluster_devices_help_other
+        : t.cluster_devices_help;
+  }
+
+  // Only Switch rows have a toggle (and with it a consumption companion
+  // device and a switch size).
+  function _clusterUsesSwitchRows(mode) {
+    return mode !== 'temperature' && mode !== 'other';
+  }
+
+  // Switch vs Temperature vs Other mode buttons, shared between the quick-add popup
+  // and the Device Config popup's own Cluster section, plus (Switch mode
+  // only) the switch-size field inline next to them - see
+  // _clusterSwitchScaleFieldHtml. A Cluster's rows are either all switches
+  // (with an optional consumption companion) or all temperature readings,
+  // never mixed - see cluster.js. mode is '' (falsy) or 'temperature';
+  // anything else, including absent, means the default switch mode.
+  // locked disables both buttons: the Device Config popup only ever edits
+  // an already-saved cluster (a pending, not-yet-saved block never gets a
+  // cog - see openLayoutConfig()), whose devices were picked for one
+  // specific mode, so switching there would silently orphan them instead
+  // of clearing a pending pick the way the quick-add popup (never locked)
+  // does.
+  function _clusterModeButtonsHtml(
+    idPrefix,
+    t,
+    mode,
+    locked,
+    switchScaleValue,
+    fontSizeValue
+  ) {
+    var html =
+      '<div class="mb-3"><label class="form-label">' +
+      _esc(t.cluster_mode) +
+      '</label><div>';
+    html += '<div class="d-flex align-items-center gap-3 flex-wrap">';
+    html +=
+      '<div class="btn-group" role="group" aria-label="' +
+      _esc(t.cluster_mode) +
+      '">';
+    [
+      {
+        mode: '',
+        label: t.cluster_mode_switch,
+        icon: 'fas fa-toggle-on',
+      },
+      {
+        mode: 'temperature',
+        label: t.cluster_mode_temperature,
+        icon: 'fas fa-thermometer-half',
+      },
+      {
+        mode: 'other',
+        label: t.cluster_mode_other,
+        icon: 'fas fa-ellipsis',
+      },
+    ].forEach(function (item) {
+      var active = (mode || '') === item.mode;
+      html +=
+        '<button type="button" class="btn btn-outline-secondary cl-mode-button' +
+        (active ? ' active' : '') +
+        '" data-cluster-mode="' +
+        item.mode +
+        '"' +
+        (locked ? ' disabled' : '') +
+        ' aria-pressed="' +
+        (active ? 'true' : 'false') +
+        '" title="' +
+        _esc(locked ? t.cluster_mode_locked_help : item.label) +
+        '" style="min-width:96px;">' +
+        '<i class="' +
+        item.icon +
+        '" aria-hidden="true"></i>' +
+        '<span class="d-block small">' +
+        _esc(item.label) +
+        '</span></button>';
+    });
+    html += '</div>';
+    html +=
+      '<span id="' +
+      _esc(idPrefix) +
+      '-switch-scale-slot">' +
+      _clusterSwitchScaleFieldHtml(idPrefix, t, mode, switchScaleValue) +
+      '</span>';
+    html += _clusterFontSizeFieldHtml(idPrefix, t, fontSizeValue);
+    html += '</div>';
+    if (locked) {
+      html +=
+        '<div class="form-text">' + _esc(t.cluster_mode_locked_help) + '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  // Cluster's switch-size field: only meaningful in Switch mode (Temperature
+  // rows have no toggle), so callers re-render this via idPrefix + '-switch-
+  // scale-wrap' whenever mode changes instead of always showing it. Stored
+  // as the block's optional switchScale custom field (js/components/
+  // cluster.js reads it into --cluster-switch-scale, css/creative.css's
+  // .cluster-row-switch scales itself with it) - value is the field's
+  // current text (empty string means "use the default size").
+  function _clusterSwitchScaleFieldHtml(idPrefix, t, mode, value) {
+    if (!_clusterUsesSwitchRows(mode)) return '';
+    // Compact inline label+input (not a stacked mb-3 block like most
+    // fields here) meant to sit right next to the Switch/Temperature
+    // buttons this sizes - see _clusterModeButtonsHtml. 10 characters wide
+    // per request; the help text moves to a title tooltip instead of a
+    // permanent form-text line to keep the pair visually small.
+    return (
+      '<span class="d-flex align-items-center gap-2" id="' +
+      _esc(idPrefix) +
+      '-switch-scale-wrap">' +
+      '<label class="form-label mb-0 small" for="' +
+      _esc(idPrefix) +
+      '-switch-scale">' +
+      _esc(t.cluster_switch_scale) +
+      '</label>' +
+      '<input type="number" class="form-control form-control-sm" id="' +
+      _esc(idPrefix) +
+      '-switch-scale" style="width:10ch;flex:0 0 auto;" min="0.3" max="3" step="0.1" placeholder="1" value="' +
+      _esc(value || '') +
+      '" title="' +
+      _esc(t.cluster_switch_scale_help) +
+      '" autocomplete="off">' +
+      '</span>'
+    );
+  }
+
+  // Cluster's font-size field (like HP iLO's font size, but per block):
+  // applies to every mode, so unlike the switch size it is never re-rendered
+  // on a mode change. Stored as the block's optional fontSize custom field
+  // (js/components/cluster.js sets --font-device-title from it).
+  function _clusterFontSizeFieldHtml(idPrefix, t, value) {
+    return (
+      '<span class="d-flex align-items-center gap-2">' +
+      '<label class="form-label mb-0 small" for="' +
+      _esc(idPrefix) +
+      '-font-size">' +
+      _esc(t.cluster_font_size) +
+      '</label>' +
+      '<input type="number" class="form-control form-control-sm" id="' +
+      _esc(idPrefix) +
+      '-font-size" style="width:10ch;flex:0 0 auto;" min="8" max="60" step="1" placeholder="18" value="' +
+      _esc(value || '') +
+      '" title="' +
+      _esc(t.cluster_font_size_help) +
+      '" autocomplete="off">' +
+      '</span>'
+    );
+  }
+
+  // Parses/clamps the font-size field's raw text into a whole number of
+  // pixels saveblocks.php will accept (8-60), or null when it should be
+  // left unset (empty or non-numeric - meaning "use the default size").
+  function _readClusterFontSize(rawValue) {
+    var num = parseInt($.trim(String(rawValue || '')), 10);
+    if (!(num > 0)) return null;
+    return Math.min(60, Math.max(8, num));
+  }
+
+  // Parses/clamps the switch-size field's raw text into a number saveblocks
+  // .php will accept (0.3-3), or null when it should be left unset (empty,
+  // non-numeric, or <= 0 - meaning "use the default size").
+  function _readClusterSwitchScale(rawValue) {
+    var text = $.trim(String(rawValue || ''));
+    if (!text) return null;
+    var num = parseFloat(text);
+    if (!(num > 0)) return null;
+    return Math.round(Math.min(3, Math.max(0.3, num)) * 100) / 100;
+  }
+
+  /* Cluster: a fixed list of Domoticz devices shown as individually-
+   * switchable rows in one block (js/components/cluster.js), rather than
+   * Group's single combined toggle. Saved as its own specialType
+   * 'cluster' - devices (required, at least one) is its only parameter
+   * unique to it; width/title/icon/last update/title-visibility all reuse
+   * the same shared options every other quick-add popup on this screen
+   * uses. See docs/blocks/specials/cluster.rst. */
+  function _showClusterPopup() {
+    var t = _translations();
+    $('#clusterblockpopup').remove();
+
+    var clusterMode = '';
+    var clusterSwitchScaleValue = '';
+    var clusterFontSizeValue = '';
+    var deviceList = _clusterAvailableDeviceList();
+    var usageList = _clusterUsageDeviceList();
+    var pendingDevices = [];
+
+    function deviceOptionsHtml() {
+      return _clusterDeviceOptionsHtml(t, deviceList, pendingDevices);
+    }
+
+    function pendingListHtml() {
+      return _clusterPendingListHtml(
+        t,
+        pendingDevices,
+        _clusterUsesSwitchRows(clusterMode) ? usageList : null
+      );
+    }
+
+    function devicesHelpText() {
+      return _clusterHelpTextForMode(t, clusterMode);
+    }
+
+    var html =
+      '<div class="modal fade" id="clusterblockpopup" tabindex="-1" aria-hidden="true">';
+    html +=
+      '<div class="modal-dialog modal-dialog-centered"><div class="modal-content">';
+    html +=
+      '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-list-check me-2" aria-hidden="true"></i>' +
+      _esc(t.cluster_block) +
+      '</h5>';
+    html +=
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      _esc(t.close) +
+      '"></button></div>';
+    html += '<div class="modal-body">';
+    html += _quickOptionsHtml('cl', {
+      icon: true,
+      iconValue: 'fas fa-list-check',
+      lastUpdate: false,
+      showTitle: true,
+    });
+    html +=
+      '<div class="mb-3"><label class="form-label" for="cl-device-name">' +
+      _esc(t.cluster_name) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="cl-device-name" autocomplete="off">';
+    html +=
+      '<div class="form-text">' + _esc(t.cluster_name_help) + '</div></div>';
+    html +=
+      '<div class="mb-3"><label class="form-label" for="cl-device-title">' +
+      _esc(t.cluster_title) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="cl-device-title" autocomplete="off"></div>';
+    html += _clusterModeButtonsHtml(
+      'cl',
+      t,
+      clusterMode,
+      false,
+      clusterSwitchScaleValue,
+      clusterFontSizeValue
+    );
+    html +=
+      '<div class="mb-3"><label class="form-label" for="cl-device-select">' +
+      _esc(t.cluster_devices) +
+      '</label>';
+    html += '<div class="d-flex gap-2">';
+    html +=
+      '<select class="form-select" id="cl-device-select">' +
+      deviceOptionsHtml() +
+      '</select>';
+    html +=
+      '<button type="button" class="btn btn-success btn-sm" id="cl-add-device-btn">' +
+      '<i class="fas fa-plus" aria-hidden="true"></i></button>';
+    html += '</div>';
+    html +=
+      '<div class="form-text" id="cl-device-help">' +
+      _esc(devicesHelpText()) +
+      '</div>';
+    html +=
+      '<div id="cl-device-pending" class="mt-2">' +
+      pendingListHtml() +
+      '</div>';
+    html += '</div>';
+    html += '<div class="cd-custom-message mt-2" role="status"></div></div>';
+    html +=
+      '<div class="modal-footer">' +
+      _backButtonHtml() +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' +
+      '<i class="fas fa-xmark me-1" aria-hidden="true"></i>' +
+      _esc(t.cancel) +
+      '</button>';
+    html +=
+      '<button type="button" class="btn btn-primary btn-save" id="cl-save-btn"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>' +
+      _esc(t.save) +
+      '</button>';
+    html += '</div></div></div></div>';
+    $('body').append(html);
+    var $popup = $('#clusterblockpopup');
+    _wireQuickOptions('cl', $popup);
+    _wireBackButton('clusterblockpopup');
+
+    _wireClusterSort(
+      $('#cl-device-pending'),
+      function () {
+        return pendingDevices;
+      },
+      function (list) {
+        pendingDevices = list;
+      }
+    );
+
+    $('#cl-add-device-btn').on('click', function () {
+      var $select = $('#cl-device-select');
+      var idx = parseInt($select.val(), 10);
+      if (!(idx > 0)) return;
+      var selectedOption = $select.find('option:selected');
+      var name = selectedOption.attr('data-name') || String(idx);
+      pendingDevices.push({ idx: idx, name: name, icon: 'auto' });
+      $select.html(deviceOptionsHtml());
+      $('#cl-device-pending').html(pendingListHtml());
+    });
+
+    $('#cl-device-pending').on('click', '.cl-icon-toggle', function () {
+      var $panel = $(this).siblings('.cl-icon-panel');
+      $popup.find('.cl-icon-panel').not($panel).addClass('d-none');
+      $panel.toggleClass('d-none');
+    });
+
+    $('#cl-device-pending').on('click', '.cl-icon-choice', function () {
+      var idx = parseInt($(this).attr('data-idx'), 10);
+      var target = pendingDevices.find(function (d) {
+        return d.idx === idx;
+      });
+      if (target) target.icon = String($(this).attr('data-icon') || '');
+      $('#cl-device-pending').html(pendingListHtml());
+    });
+
+    $popup.on('click', function (event) {
+      if (!$(event.target).closest('.cl-icon-toggle, .cl-icon-panel').length)
+        $popup.find('.cl-icon-panel').addClass('d-none');
+    });
+
+    $('#cl-device-pending').on('click', '.cl-remove-btn', function () {
+      var idx = parseInt($(this).attr('data-idx'), 10);
+      pendingDevices = pendingDevices.filter(function (d) {
+        return d.idx !== idx;
+      });
+      $('#cl-device-select').html(deviceOptionsHtml());
+      $('#cl-device-pending').html(pendingListHtml());
+    });
+
+    $('#cl-device-pending').on('change', '.cl-usage-select', function () {
+      var idx = parseInt($(this).attr('data-idx'), 10);
+      var usageIdx = parseInt($(this).val(), 10) || null;
+      var target = pendingDevices.find(function (d) {
+        return d.idx === idx;
+      });
+      if (target) target.usageIdx = usageIdx;
+    });
+
+    $('#cl-device-pending').on('input', '.cl-name-input', function () {
+      var idx = parseInt($(this).attr('data-idx'), 10);
+      var title = _cutUtf8($.trim(String($(this).val() || '')), 100);
+      var target = pendingDevices.find(function (d) {
+        return d.idx === idx;
+      });
+      if (target) target.title = title;
+    });
+
+    $popup.on('input', '#cl-switch-scale', function () {
+      clusterSwitchScaleValue = String($(this).val() || '');
+    });
+
+    $popup.on('input', '#cl-font-size', function () {
+      clusterFontSizeValue = String($(this).val() || '');
+    });
+
+    $popup.on('click', '.cl-mode-button', function () {
+      var mode = String($(this).attr('data-cluster-mode') || '');
+      if (mode === clusterMode) return;
+      clusterMode = mode;
+      $popup.find('.cl-mode-button').each(function () {
+        var active = String($(this).attr('data-cluster-mode') || '') === mode;
+        $(this)
+          .toggleClass('active', active)
+          .attr('aria-pressed', active ? 'true' : 'false');
+      });
+      // Switch and temperature device sets don't overlap - a pick made
+      // under the previous mode would no longer make sense, so clear it
+      // rather than leave a stale, now-invalid mix.
+      pendingDevices = [];
+      deviceList =
+        clusterMode === 'temperature'
+          ? _clusterTemperatureDeviceList()
+          : clusterMode === 'other'
+            ? _clusterOtherDeviceList()
+            : _clusterAvailableDeviceList();
+      $('#cl-device-select').html(deviceOptionsHtml());
+      $('#cl-device-pending').html(pendingListHtml());
+      $('#cl-device-help').text(devicesHelpText());
+      $('#cl-switch-scale-slot').html(
+        _clusterSwitchScaleFieldHtml(
+          'cl',
+          t,
+          clusterMode,
+          clusterSwitchScaleValue
+        )
+      );
+    });
+
+    $('#cl-save-btn').on('click', function () {
+      var $message = $popup
+        .find('.cd-custom-message')
+        .removeClass('text-danger')
+        .text('');
+      var reference = $.trim(String($('#cl-device-name').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#cl-device-title').val() || '')),
+        100
+      );
+      if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
+        $message.addClass('text-danger').text(t.invalid_cluster_name);
+        $('#cl-device-name').trigger('focus');
+        return;
+      }
+      if (
+        (typeof blocks !== 'undefined' && blocks[reference]) ||
+        managedSpecials[_specialOrderKey(reference)]
+      ) {
+        $message.addClass('text-danger').text(t.invalid_cluster_name);
+        $('#cl-device-name').trigger('focus');
+        return;
+      }
+      if (!pendingDevices.length) {
+        $message.addClass('text-danger').text(t.invalid_cluster_devices);
+        return;
+      }
+
+      var quickOptions = _readQuickOptions('cl');
+      var iconIsImage =
+        quickOptions.icon && quickOptions.iconSource === 'image';
+      var deviceIdxList = pendingDevices.map(function (d) {
+        return d.idx;
+      });
+      var customRows = [];
+      if (title)
+        customRows.push({
+          field: 'title',
+          setting: title,
+          value: title,
+          system: true,
+        });
+      if (iconIsImage && quickOptions.iconValue) {
+        customRows.push({
+          field: 'image',
+          setting: quickOptions.iconValue,
+          value: quickOptions.iconValue,
+        });
+      }
+      customRows.push({
+        field: 'devices',
+        setting: JSON.stringify(deviceIdxList),
+        value: deviceIdxList,
+      });
+      var titlesMap = {};
+      pendingDevices.forEach(function (d) {
+        if (d.title) titlesMap[d.idx] = d.title;
+      });
+      if (Object.keys(titlesMap).length) {
+        customRows.push({
+          field: 'titles',
+          setting: JSON.stringify(titlesMap),
+          value: titlesMap,
+        });
+      }
+      var iconsMap = {};
+      pendingDevices.forEach(function (d) {
+        if (d.icon) iconsMap[d.idx] = d.icon;
+      });
+      if (Object.keys(iconsMap).length) {
+        customRows.push({
+          field: 'icons',
+          setting: JSON.stringify(iconsMap),
+          value: iconsMap,
+        });
+      }
+      var fontSize = _readClusterFontSize($('#cl-font-size').val());
+      if (fontSize !== null) {
+        customRows.push({
+          field: 'fontSize',
+          setting: String(fontSize),
+          value: fontSize,
+        });
+      }
+      if (_clusterUsesSwitchRows(clusterMode)) {
+        var switchScale = _readClusterSwitchScale($('#cl-switch-scale').val());
+        if (switchScale !== null) {
+          customRows.push({
+            field: 'switchScale',
+            setting: String(switchScale),
+            value: switchScale,
+          });
+        }
+      }
+      if (clusterMode === 'temperature') {
+        customRows.push({
+          field: 'mode',
+          setting: 'temperature',
+          value: 'temperature',
+        });
+      } else if (clusterMode === 'other') {
+        customRows.push({ field: 'mode', setting: 'other', value: 'other' });
+      } else {
+        var usageMap = {};
+        pendingDevices.forEach(function (d) {
+          if (d.usageIdx) usageMap[d.idx] = d.usageIdx;
+        });
+        if (Object.keys(usageMap).length) {
+          customRows.push({
+            field: 'usage',
+            setting: JSON.stringify(usageMap),
+            value: usageMap,
+          });
+        }
+      }
+
+      var orderKey = _specialOrderKey(reference);
+      managedSpecials[orderKey] = {
+        kind: 'special',
+        specialType: 'cluster',
+        orderKey: orderKey,
+        reference: reference,
+        definition: {},
+        idx: null,
+        title: title,
+        width: 4,
+        height: null,
+        showTitle: quickOptions.showTitle,
+        options: {
+          icon: quickOptions.icon,
+          iconValue: iconIsImage ? null : quickOptions.iconValue,
+          last_update: quickOptions.lastUpdate,
+        },
+        customFields: customRows,
+        preservedFields: {},
+      };
+      managedOrder.push(orderKey);
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('clusterblockpopup'));
+      _save();
+    });
+
+    $popup.one('hidden.bs.modal', function () {
+      $(this).remove();
+    });
+    window.bootstrap.Modal.getOrCreateInstance(
+      document.getElementById('clusterblockpopup')
     ).show();
   }
 
@@ -3409,11 +4825,39 @@ var DashticzDeviceEditor = (function () {
     return host.replace(/\.+$/, '');
   }
 
+  // The ":port" that _normalizeLmsServer() cuts off a pasted address.
+  function _lmsPortFromServer(value) {
+    var host = String(value || '')
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+      .replace(/[/?#].*$/, '');
+    if (host.indexOf('[') === -1 && (host.match(/:/g) || []).length === 1) {
+      var port = parseInt(host.slice(host.indexOf(':') + 1), 10);
+      return port > 0 && port <= 65535 ? port : 0;
+    }
+    return 0;
+  }
+
+  // Cleans the Server field and moves a pasted ":port" to the Port field
+  // while that still holds the default.
+  function _cleanLmsServerInput($popup, prefix) {
+    var $serverInput = $popup.find('#' + prefix + '-lms-server');
+    var $portInput = $popup.find('#' + prefix + '-lms-port');
+    var pastedPort = _lmsPortFromServer($serverInput.val());
+    var server = _normalizeLmsServer($serverInput.val());
+    $serverInput.val(server);
+    var currentPort = parseInt($portInput.val(), 10);
+    if (pastedPort && (!currentPort || currentPort === 9000)) {
+      $portInput.val(pastedPort);
+    }
+    return server;
+  }
+
   function _lmsFieldsHtml(prefix, values) {
     var t = _translations();
     values = values || {};
+    // Server/IP + Port and Username + Password each share one row.
     var html =
-      '<div class="mb-3"><label class="form-label" for="' +
+      '<div class="de-lms-pair mb-3"><div><label class="form-label" for="' +
       prefix +
       '-lms-server">' +
       _esc(t.lms_server) +
@@ -3425,7 +4869,7 @@ var DashticzDeviceEditor = (function () {
       _esc(values.server || '') +
       '"></div>';
     html +=
-      '<div class="mb-3"><label class="form-label" for="' +
+      '<div><label class="form-label" for="' +
       prefix +
       '-lms-port">' +
       _esc(t.lms_port) +
@@ -3435,9 +4879,9 @@ var DashticzDeviceEditor = (function () {
       prefix +
       '-lms-port" value="' +
       _esc(values.port || 9000) +
-      '"></div>';
+      '"></div></div>';
     html +=
-      '<div class="mb-3"><label class="form-label" for="' +
+      '<div class="mb-3"><div class="de-lms-pair"><div><label class="form-label" for="' +
       prefix +
       '-lms-username">' +
       _esc(t.lms_username) +
@@ -3449,7 +4893,7 @@ var DashticzDeviceEditor = (function () {
       _esc(values.username || '') +
       '"></div>';
     html +=
-      '<div class="mb-3"><label class="form-label" for="' +
+      '<div><label class="form-label" for="' +
       prefix +
       '-lms-password">' +
       _esc(t.lms_password) +
@@ -3459,12 +4903,12 @@ var DashticzDeviceEditor = (function () {
       prefix +
       '-lms-password" autocomplete="off" value="' +
       _esc(values.password || '') +
-      '">';
+      '"></div></div>';
     html +=
       '<div class="form-text">' + _esc(t.lms_credentials_help) + '</div></div>';
     html += '<div class="mb-3">';
     html +=
-      '<button type="button" class="btn btn-outline-secondary btn-sm de-lms-test" id="' +
+      '<button type="button" class="btn btn-sm dt-btn-green de-lms-test" id="' +
       prefix +
       '-lms-test"><i class="fas fa-plug me-1" aria-hidden="true"></i>' +
       _esc(t.lms_test_connection) +
@@ -3501,7 +4945,17 @@ var DashticzDeviceEditor = (function () {
       _esc(t.lms_refresh_interval) +
       '</label>';
     html += '<select class="form-select" id="' + prefix + '-lms-refresh">';
-    LMS_REFRESH_OPTIONS.forEach(function (seconds) {
+    // A hand-written interval (15, 120...) stays selectable instead of the
+    // browser silently picking the first option.
+    var refreshOptions = LMS_REFRESH_OPTIONS.slice();
+    var currentRefresh = parseInt(values.refresh, 10);
+    if (currentRefresh > 0 && refreshOptions.indexOf(currentRefresh) < 0) {
+      refreshOptions.push(currentRefresh);
+      refreshOptions.sort(function (a, b) {
+        return a - b;
+      });
+    }
+    refreshOptions.forEach(function (seconds) {
       html +=
         '<option value="' +
         seconds +
@@ -3514,35 +4968,44 @@ var DashticzDeviceEditor = (function () {
         '</option>';
     });
     html += '</select></div>';
+    // js/lmsconfig.js adds its Player controls switch right after this one,
+    // inside the same .de-lms-switches row, so the two sit side by side.
     html +=
-      '<label class="form-check form-switch mb-3"><input class="form-check-input de-lms-switch" type="checkbox" id="' +
+      '<div class="de-lms-switches mb-3">' +
+      '<label class="form-check form-switch"><input class="form-check-input de-lms-switch" type="checkbox" id="' +
       prefix +
       '-lms-hide-when-off"' +
       (values.hideWhenOff ? ' checked' : '') +
       '>' +
       '<span class="form-check-label">' +
       _esc(t.lms_hide_when_off) +
-      '</span></label>';
+      '</span></label></div>';
     html += '<h6 class="de-section-title">' + _esc(t.lms_text_style) + '</h6>';
     html += '<div class="row g-2 mb-3">';
     [
       {
         key: 'title',
         label: t.lms_title_line,
-        size: values.titleSize || 16,
-        color: values.titleColor || '#ffffff',
+        size: values.titleSize,
+        color: values.titleColor,
+        defaultSize: 16,
+        defaultColor: '#ffffff',
       },
       {
         key: 'artist',
         label: t.lms_artist_line,
-        size: values.artistSize || 14,
-        color: values.artistColor || '#cccccc',
+        size: values.artistSize,
+        color: values.artistColor,
+        defaultSize: 14,
+        defaultColor: '#cccccc',
       },
       {
         key: 'station',
         label: t.lms_station_line,
-        size: values.stationSize || 14,
-        color: values.stationColor || '#999999',
+        size: values.stationSize,
+        color: values.stationColor,
+        defaultSize: 14,
+        defaultColor: '#999999',
       },
     ].forEach(function (line) {
       html += '<div class="col-12 col-md-4">';
@@ -3563,7 +5026,9 @@ var DashticzDeviceEditor = (function () {
         '-lms-' +
         line.key +
         '-size" value="' +
-        _esc(line.size) +
+        _esc(line.size || '') +
+        '" placeholder="' +
+        _esc(line.defaultSize) +
         '"></div>';
       html +=
         '<div><label class="form-label small mb-1" for="' +
@@ -3579,8 +5044,12 @@ var DashticzDeviceEditor = (function () {
         '-lms-' +
         line.key +
         '-color" value="' +
-        _esc(line.color) +
-        '" title="' +
+        _esc(line.color || line.defaultColor) +
+        '"' +
+        // A colour input cannot be empty: until it is touched the block has
+        // no colour of its own and the theme keeps deciding.
+        (line.color ? '' : ' data-lms-unset="1"') +
+        ' title="' +
         _esc(t.lms_font_color) +
         '"></div>';
       html += '</div></div>';
@@ -3592,13 +5061,15 @@ var DashticzDeviceEditor = (function () {
   /* Call once after appending markup built with _lmsFieldsHtml() above. */
   function _wireLmsFields(prefix, $popup) {
     var t = _translations();
+    $popup.on('input change', 'input[data-lms-unset]', function () {
+      $(this).removeAttr('data-lms-unset');
+    });
     $popup.on('click', '#' + prefix + '-lms-test', function () {
       var $btn = $(this);
       var $status = $popup.find('.de-lms-test-status');
       var $player = $popup.find('#' + prefix + '-lms-player');
       var $serverInput = $popup.find('#' + prefix + '-lms-server');
-      var server = _normalizeLmsServer($serverInput.val());
-      $serverInput.val(server);
+      var server = _cleanLmsServerInput($popup, prefix);
       var port =
         parseInt($popup.find('#' + prefix + '-lms-port').val(), 10) || 9000;
       if (!server) {
@@ -3683,11 +5154,23 @@ var DashticzDeviceEditor = (function () {
     });
   }
 
+  // An empty size or an untouched colour means "not set": undefined keeps the
+  // property out of CONFIG.js so the stylesheet defaults stay in charge.
+  function _readLmsSize($popup, id) {
+    var size = parseInt($popup.find('#' + id).val(), 10);
+    return size > 0 ? size : undefined;
+  }
+
+  function _readLmsColor($popup, id) {
+    var $input = $popup.find('#' + id);
+    return $input.is('[data-lms-unset]')
+      ? undefined
+      : String($input.val() || '');
+  }
+
   function _readLmsFields(prefix, $popup) {
     return {
-      server: _normalizeLmsServer(
-        $popup.find('#' + prefix + '-lms-server').val()
-      ),
+      server: _cleanLmsServerInput($popup, prefix),
       port: parseInt($popup.find('#' + prefix + '-lms-port').val(), 10) || 9000,
       username: $.trim(
         String($popup.find('#' + prefix + '-lms-username').val() || '')
@@ -3702,23 +5185,12 @@ var DashticzDeviceEditor = (function () {
       hideWhenOff: $popup
         .find('#' + prefix + '-lms-hide-when-off')
         .is(':checked'),
-      titleSize:
-        parseInt($popup.find('#' + prefix + '-lms-title-size').val(), 10) || 16,
-      titleColor: String(
-        $popup.find('#' + prefix + '-lms-title-color').val() || '#ffffff'
-      ),
-      artistSize:
-        parseInt($popup.find('#' + prefix + '-lms-artist-size').val(), 10) ||
-        14,
-      artistColor: String(
-        $popup.find('#' + prefix + '-lms-artist-color').val() || '#cccccc'
-      ),
-      stationSize:
-        parseInt($popup.find('#' + prefix + '-lms-station-size').val(), 10) ||
-        14,
-      stationColor: String(
-        $popup.find('#' + prefix + '-lms-station-color').val() || '#999999'
-      ),
+      titleSize: _readLmsSize($popup, prefix + '-lms-title-size'),
+      titleColor: _readLmsColor($popup, prefix + '-lms-title-color'),
+      artistSize: _readLmsSize($popup, prefix + '-lms-artist-size'),
+      artistColor: _readLmsColor($popup, prefix + '-lms-artist-color'),
+      stationSize: _readLmsSize($popup, prefix + '-lms-station-size'),
+      stationColor: _readLmsColor($popup, prefix + '-lms-station-color'),
     };
   }
 
@@ -3778,11 +5250,15 @@ var DashticzDeviceEditor = (function () {
     _wireBackButton('lmsblockpopup');
 
     $('#lm-save-btn').on('click', function () {
+      if ($(this).prop('disabled')) return;
       var $message = $popup
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#lm-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#lm-device-title').val() || '')),
+        100
+      );
       var lms = _readLmsFields('lm', $popup);
       if (!lms.server) {
         $message.addClass('text-danger').text(t.invalid_lms_server);
@@ -3853,9 +5329,9 @@ var DashticzDeviceEditor = (function () {
         lmsStationColor: lms.stationColor,
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('lmsblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('lmsblockpopup'));
       _save();
     });
 
@@ -3948,8 +5424,16 @@ var DashticzDeviceEditor = (function () {
         .removeClass('text-danger')
         .text('');
       var reference = $.trim(String($('#hb-device-name').val() || ''));
-      var title = $.trim(String($('#hb-device-title').val() || ''));
-      if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(reference)) {
+      var title = _cutUtf8(
+        $.trim(String($('#hb-device-title').val() || '')),
+        100
+      );
+      // Same pattern as saveblocks.php, without the names that the editors
+      // read as a dummy or device block.
+      if (
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(reference) ||
+        /^(?:dummyblock|device)_\d+$/.test(reference)
+      ) {
         $message.addClass('text-danger').text(t.invalid_html_block_name);
         $('#hb-device-name').trigger('focus');
         return;
@@ -4021,9 +5505,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('htmlblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('htmlblockpopup'));
       _save();
     });
 
@@ -4094,7 +5578,7 @@ var DashticzDeviceEditor = (function () {
     html +=
       '<input type="number" class="form-control" id="if-device-height" min="0" autocomplete="off"></div>';
     html +=
-      '<div class="mb-3 form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="if-device-scrollbars">';
+      '<div class="mb-3 form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="if-device-scrollbars" checked>';
     html +=
       '<label class="form-check-label" for="if-device-scrollbars">' +
       _esc(t.iframe_block_scrollbars) +
@@ -4146,7 +5630,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#if-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#if-device-title').val() || '')),
+        100
+      );
       var frameurl = $.trim(String($('#if-device-url').val() || ''));
       if (!frameurl || frameurl.length > 2048) {
         $message.addClass('text-danger').text(t.invalid_iframe_block_url);
@@ -4184,21 +5671,13 @@ var DashticzDeviceEditor = (function () {
         setting: frameurl,
         value: frameurl,
       });
-      if (height) {
-        var heightInt = parseInt(height, 10) || 0;
-        if (heightInt > 0) {
-          customRows.push({
-            field: 'height',
-            setting: String(heightInt),
-            value: heightInt,
-          });
-        }
-      }
-      if (scrollbars) {
+      var blockHeight = height ? _parseHeight(height) : null;
+      // The scrollbars show unless the block says scrollbars: false.
+      if (!scrollbars) {
         customRows.push({
           field: 'scrollbars',
-          setting: 'true',
-          value: true,
+          setting: 'false',
+          value: false,
         });
       }
       if (scaletofit) {
@@ -4247,7 +5726,7 @@ var DashticzDeviceEditor = (function () {
         idx: null,
         title: title,
         width: 6,
-        height: null,
+        height: blockHeight,
         showTitle: quickOptions.showTitle,
         options: {
           icon: quickOptions.icon,
@@ -4258,9 +5737,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('iframeblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('iframeblockpopup'));
       _save();
     });
 
@@ -4272,6 +5751,301 @@ var DashticzDeviceEditor = (function () {
     ).show();
   }
 
+  /* Calendar's icalurl field, shared by the quick-add popup
+     (_showCalendarPopup) and the generic Device Config popup
+     (_showConfigPopup's isCalendarBlock branch), same reasoning as
+     _graphFieldsHtml/_clusterFieldsHtml above: one row builder used from
+     both places via a `prefix`-scoped id/class so the two popups never
+     collide. Starts as a single plain-string icalurl (unchanged from
+     before); once a second row is added, icalurl becomes the
+     name -> {ics, color} object shape js/components/calendar.js already
+     accepts for any block regardless of key (see the Widgets catalog's
+     own multi-source editor, js/widgeteditor.js's #we-calendar-add, for
+     the same shape). */
+  function _calendarSourcesFromIcalurl(icalurl) {
+    if (typeof icalurl === 'string') {
+      return [{ name: '', ics: icalurl, color: 'white' }];
+    }
+    if (icalurl && typeof icalurl === 'object' && !Array.isArray(icalurl)) {
+      var out = [];
+      Object.keys(icalurl).forEach(function (name) {
+        var source = icalurl[name] || {};
+        out.push({
+          name: name,
+          ics: typeof source.ics === 'string' ? source.ics : '',
+          color: typeof source.color === 'string' ? source.color : 'blue',
+        });
+      });
+      if (out.length) {
+        // A saved name -> {ics, color} object stays an object, also with one
+        // source, so its name and colour survive a save.
+        out.keepObject = true;
+        return out;
+      }
+    }
+    return [{ name: '', ics: '', color: 'white' }];
+  }
+
+  function _calendarPickerColor(color) {
+    var named = {
+      black: '#000000',
+      blue: '#0000ff',
+      green: '#008000',
+      lightblue: '#add8e6',
+      lightgreen: '#90ee90',
+      orange: '#ffa500',
+      purple: '#800080',
+      red: '#ff0000',
+      white: '#ffffff',
+      yellow: '#ffff00',
+    };
+    var value = String(color || '').toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(value)) return value;
+    if (/^#[0-9a-f]{3}$/.test(value)) {
+      return (
+        '#' +
+        value.charAt(1) +
+        value.charAt(1) +
+        value.charAt(2) +
+        value.charAt(2) +
+        value.charAt(3) +
+        value.charAt(3)
+      );
+    }
+    return named[value] || '#0000ff';
+  }
+
+  function _calendarDefaultSource(index, t) {
+    return {
+      name: (t.calendar_default_name || 'Calendar') + ' ' + (index + 1),
+      ics: '',
+      color: index === 0 ? 'white' : 'blue',
+    };
+  }
+
+  function _calendarSourceRowHtml(prefix, source, index, multi, t) {
+    if (!multi) {
+      return (
+        '<div class="mb-2 de-calendar-row" data-calendar-index="0">' +
+        '<label class="form-label" for="' +
+        _esc(prefix) +
+        '-calendar-url-0">' +
+        _esc(t.calendar_block_icalurl) +
+        '</label>' +
+        '<input type="text" class="form-control de-calendar-url" id="' +
+        _esc(prefix) +
+        '-calendar-url-0" placeholder="https://..." autocomplete="off" value="' +
+        _esc(source.ics || '') +
+        '">' +
+        '<div class="form-text">' +
+        _esc(t.calendar_block_icalurl_help) +
+        '</div></div>'
+      );
+    }
+    var color = source.color || 'blue';
+    return (
+      '<div class="border rounded p-2 mb-2 de-calendar-row" data-calendar-index="' +
+      index +
+      '">' +
+      '<div class="d-flex align-items-center justify-content-between mb-2">' +
+      '<strong>' +
+      _esc(t.calendar_source || 'Calendar') +
+      ' ' +
+      (index + 1) +
+      '</strong>' +
+      '<button type="button" class="btn btn-sm btn-outline-danger de-calendar-remove" aria-label="' +
+      _esc(t.calendar_remove || 'Remove calendar') +
+      '"><i class="fas fa-minus" aria-hidden="true"></i></button></div>' +
+      '<div class="mb-2"><label class="form-label">' +
+      _esc(t.calendar_name || 'Name') +
+      '</label>' +
+      '<input type="text" class="form-control form-control-sm de-calendar-name" maxlength="100" value="' +
+      _esc(source.name || '') +
+      '"></div>' +
+      '<div class="mb-2"><label class="form-label">' +
+      _esc(t.ics_url || 'ICS URL') +
+      '</label>' +
+      '<input type="url" class="form-control form-control-sm de-calendar-url" maxlength="2048" placeholder="https://…/calendar.ics" value="' +
+      _esc(source.ics || '') +
+      '"></div>' +
+      '<div><label class="form-label">' +
+      _esc(t.calendar_color || 'Color') +
+      '</label>' +
+      '<input type="color" class="form-control form-control-color de-calendar-color" value="' +
+      _calendarPickerColor(color) +
+      '" data-calendar-color-value="' +
+      _esc(color) +
+      '"></div></div>'
+    );
+  }
+
+  function _calendarIsMulti(sources) {
+    return sources.length > 1 || sources.keepObject === true;
+  }
+
+  function _calendarFieldsHtml(prefix, sources, t) {
+    var multi = _calendarIsMulti(sources);
+    var html =
+      '<div class="de-calendar-fields" data-calendar-prefix="' +
+      _esc(prefix) +
+      '">';
+    html += '<div id="' + _esc(prefix) + '-calendar-list">';
+    sources.forEach(function (source, index) {
+      html += _calendarSourceRowHtml(prefix, source, index, multi, t);
+    });
+    html += '</div>';
+    html +=
+      '<button type="button" class="btn btn-sm btn-outline-success mb-3" id="' +
+      _esc(prefix) +
+      '-calendar-add"><i class="fas fa-plus me-1" aria-hidden="true"></i>' +
+      _esc(t.calendar_add || 'Add calendar') +
+      '</button>';
+    html += '</div>';
+    return html;
+  }
+
+  /* Reads every row's current input values back into `sources` (a mutable
+     array shared with the caller, same pattern as clusterPendingDevices
+     above) so a value typed but not yet blurred is never lost on
+     add/remove/Save. */
+  function _captureCalendarFields(prefix, $popup, sources) {
+    var multi = _calendarIsMulti(sources);
+    $popup
+      .find('[data-calendar-prefix="' + prefix + '"] .de-calendar-row')
+      .each(function () {
+        var index = parseInt($(this).attr('data-calendar-index'), 10);
+        if (!sources[index]) return;
+        sources[index].ics = $.trim(
+          String($(this).find('.de-calendar-url').val() || '')
+        );
+        if (multi) {
+          sources[index].name = $.trim(
+            String($(this).find('.de-calendar-name').val() || '')
+          );
+          sources[index].color =
+            $(this)
+              .find('.de-calendar-color')
+              .attr('data-calendar-color-value') ||
+            $(this).find('.de-calendar-color').val() ||
+            'blue';
+        }
+      });
+  }
+
+  function _wireCalendarFields(prefix, $popup, sources, t) {
+    function render() {
+      $popup.find('#' + prefix + '-calendar-list').html(
+        sources
+          .map(function (source, index) {
+            return _calendarSourceRowHtml(
+              prefix,
+              source,
+              index,
+              _calendarIsMulti(sources),
+              t
+            );
+          })
+          .join('')
+      );
+    }
+    $popup.on('click', '#' + prefix + '-calendar-add', function () {
+      _captureCalendarFields(prefix, $popup, sources);
+      sources.push(_calendarDefaultSource(sources.length, t));
+      render();
+    });
+    $popup.on(
+      'click',
+      '[data-calendar-prefix="' + prefix + '"] .de-calendar-remove',
+      function () {
+        _captureCalendarFields(prefix, $popup, sources);
+        var index = parseInt(
+          $(this).closest('.de-calendar-row').attr('data-calendar-index'),
+          10
+        );
+        sources.splice(index, 1);
+        if (!sources.length) sources.push(_calendarDefaultSource(0, t));
+        render();
+      }
+    );
+    $popup.on(
+      'input change',
+      '[data-calendar-prefix="' + prefix + '"] .de-calendar-color',
+      function () {
+        $(this).attr('data-calendar-color-value', $(this).val());
+      }
+    );
+  }
+
+  /* Validates and reads back the final icalurl value: a single row stays a
+     plain string (unchanged save shape), two or more rows become the
+     name -> {ics, color} object js/components/calendar.js accepts. */
+  function _readCalendarFields(prefix, $popup, sources, t) {
+    _captureCalendarFields(prefix, $popup, sources);
+    if (!_calendarIsMulti(sources)) {
+      var single = $.trim((sources[0] && sources[0].ics) || '');
+      if (!single || single.length > 2048) {
+        return { valid: false, reason: 'url' };
+      }
+      return { valid: true, icalurl: single };
+    }
+    // Same limits as saveblocks.php: 20 sources, names of at most 100 bytes,
+    // http(s) or webcal sources. The maps have no prototype so a name like
+    // __proto__ or toString is an ordinary key.
+    if (sources.length > 20) return { valid: false, reason: 'toomany' };
+    var names = Object.create(null);
+    var result = Object.create(null);
+    for (var i = 0; i < sources.length; i++) {
+      var name = $.trim(sources[i].name || '');
+      var ics = $.trim(sources[i].ics || '');
+      if (!name || _utf8Length(name) > 100) {
+        return { valid: false, reason: 'name' };
+      }
+      if (names[name]) return { valid: false, reason: 'duplicate' };
+      if (
+        !ics ||
+        ics.length > 2048 ||
+        !/^(?:https?|webcal):\/\/[^\s]+$/i.test(ics)
+      ) {
+        return { valid: false, reason: 'url' };
+      }
+      names[name] = true;
+      result[name] = { ics: ics, color: sources[i].color || 'blue' };
+    }
+    return { valid: true, icalurl: result };
+  }
+
+  /* Managed-items list subtitle for a Calendar block (see _specialItemHtml
+     below) - a single-source block still shows its ICS URL like before;
+     a multi-source block shows its calendar names instead of the raw
+     saved JSON string. */
+  function _calendarBlockDetailText(icalurlRow, fallback, t) {
+    var value = icalurlRow && icalurlRow.value;
+    if (typeof value === 'string' && value) return value;
+    if (value && typeof value === 'object') {
+      var names = Object.keys(value);
+      if (names.length) {
+        return (
+          names.length +
+          ' ' +
+          (t.calendar_source_plural || 'calendars') +
+          ': ' +
+          names.join(', ')
+        );
+      }
+    }
+    return fallback;
+  }
+
+  function _calendarFieldsErrorText(t, reason) {
+    if (reason === 'name')
+      return t.calendar_name_required || 'Enter a name for every calendar.';
+    if (reason === 'duplicate')
+      return t.calendar_duplicate_name || 'Calendar names must be unique.';
+    if (reason === 'toomany')
+      return t.calendar_too_many || 'At most 20 calendars are allowed.';
+    return t.invalid_calendar_block_icalurl;
+  }
+
   /* Repeatable Calendar block - same managedSpecials mechanism as iFrame/
      HTML Block above (kind:'special', specialType:'calendar'), so any
      number of independently-configured calendars can be placed, unlike
@@ -4280,12 +6054,10 @@ var DashticzDeviceEditor = (function () {
      truthy icalurl (or an explicit type:'calendar'/legacy calendars
      array) - see _specialFromReference()'s matching 'calendar' branch,
      which excludes the legacy 'widget_calendar' key so that singleton
-     stays on its own Widget Editor path unchanged. Scoped to a single
-     ICS source per block (title/icalurl/holidayurl/layout/maxitems/
-     weeks/lastweek/isoweek/startonly) - the existing singleton widget's
-     richer multi-source-with-color picker stays available there for
-     anyone who needs it, same as hand-editing custom/CONFIG.js already
-     supports every calendar.js field regardless. */
+     stays on its own Widget Editor path unchanged. Starts as a single
+     ICS URL field, same as before; the "+" button (_calendarFieldsHtml)
+     appends further calendars and Save converts to the multi-source
+     icalurl object once two or more rows exist - see the helpers above. */
   function _showCalendarPopup() {
     var t = _translations();
     $('#calendarblockpopup').remove();
@@ -4317,16 +6089,9 @@ var DashticzDeviceEditor = (function () {
       lastUpdate: false,
       showTitle: true,
     });
-    html +=
-      '<div class="mb-3"><label class="form-label" for="cal-device-icalurl">' +
-      _esc(t.calendar_block_icalurl) +
-      '</label>';
-    html +=
-      '<input type="text" class="form-control" id="cal-device-icalurl" placeholder="https://..." autocomplete="off">';
-    html +=
-      '<div class="form-text">' +
-      _esc(t.calendar_block_icalurl_help) +
-      '</div></div>';
+    var calendarSources = [_calendarDefaultSource(0, t)];
+    calendarSources[0].name = '';
+    html += _calendarFieldsHtml('cal-device', calendarSources, t);
     html +=
       '<div class="mb-3"><label class="form-label" for="cal-device-title">' +
       _esc(t.html_block_title) +
@@ -4400,19 +6165,30 @@ var DashticzDeviceEditor = (function () {
     var $popup = $('#calendarblockpopup');
     _wireQuickOptions('cal', $popup);
     _wireBackButton('calendarblockpopup');
+    _wireCalendarFields('cal-device', $popup, calendarSources, t);
 
     $('#cal-save-btn').on('click', function () {
       var $message = $popup
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#cal-device-title').val() || ''));
-      var icalurl = $.trim(String($('#cal-device-icalurl').val() || ''));
-      if (!icalurl || icalurl.length > 2048) {
-        $message.addClass('text-danger').text(t.invalid_calendar_block_icalurl);
-        $('#cal-device-icalurl').trigger('focus');
+      var title = _cutUtf8(
+        $.trim(String($('#cal-device-title').val() || '')),
+        100
+      );
+      var calendarResult = _readCalendarFields(
+        'cal-device',
+        $popup,
+        calendarSources,
+        t
+      );
+      if (!calendarResult.valid) {
+        $message
+          .addClass('text-danger')
+          .text(_calendarFieldsErrorText(t, calendarResult.reason));
         return;
       }
+      var icalurl = calendarResult.icalurl;
 
       var quickOptions = _readQuickOptions('cal');
       var iconIsImage =
@@ -4440,7 +6216,12 @@ var DashticzDeviceEditor = (function () {
           value: quickOptions.iconValue,
         });
       }
-      customRows.push({ field: 'icalurl', setting: icalurl, value: icalurl });
+      customRows.push({
+        field: 'icalurl',
+        setting:
+          typeof icalurl === 'string' ? icalurl : JSON.stringify(icalurl),
+        value: icalurl,
+      });
       if (holidayurl) {
         customRows.push({
           field: 'holidayurl',
@@ -4507,9 +6288,18 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('calendarblockpopup')
-      ).hide();
+      // Like Dashticz 3: write the calendar format and language to the config
+      // when they are not configured yet, so they can be edited there and in
+      // the Settings menu.
+      ['calendarformat', 'calendarlanguage'].forEach(function (name) {
+        var configured =
+          typeof config !== 'undefined' && typeof config[name] !== 'undefined';
+        if (!configured && typeof settings[name] !== 'undefined')
+          pendingWidgetSettings[name] = String(settings[name]);
+      });
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('calendarblockpopup'));
       _save();
     });
 
@@ -4644,7 +6434,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#pt-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#pt-device-title').val() || '')),
+        100
+      );
       var station = $.trim(String($('#pt-device-station').val() || ''));
       var tpc = $.trim(String($('#pt-device-tpc').val() || ''));
       if (!station && !tpc) {
@@ -4734,9 +6527,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('publictransportblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('publictransportblockpopup'));
       _save();
     });
 
@@ -4855,7 +6648,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#tg-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#tg-device-title').val() || '')),
+        100
+      );
       var idx = parseInt($('#tg-device-idx').val(), 10) || 0;
       if (idx < 1) {
         $message.addClass('text-danger').text(t.invalid_timegraph_block_idx);
@@ -4897,16 +6693,7 @@ var DashticzDeviceEditor = (function () {
           });
         }
       }
-      if (height) {
-        var heightInt = parseInt(height, 10) || 0;
-        if (heightInt > 0) {
-          customRows.push({
-            field: 'height',
-            setting: String(heightInt),
-            value: heightInt,
-          });
-        }
-      }
+      var blockHeight = height ? _parseHeight(height) : null;
       if (xTicks) {
         var xTicksInt = parseInt(xTicks, 10) || 0;
         if (xTicksInt > 0) {
@@ -4942,7 +6729,7 @@ var DashticzDeviceEditor = (function () {
         idx: idx,
         title: title,
         width: 6,
-        height: null,
+        height: blockHeight,
         showTitle: quickOptions.showTitle,
         options: {
           icon: quickOptions.icon,
@@ -4953,9 +6740,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('timegraphblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('timegraphblockpopup'));
       _save();
     });
 
@@ -4974,9 +6761,9 @@ var DashticzDeviceEditor = (function () {
      catalog's singleton 'xmltvguide' entry (always the fixed
      'widget_xmltvguide' key, and whose settings additionally fall back to
      global settings['xmltv_*'] when a block leaves a field unset -
-     js/components/xmltvguide.js's defaultCfg). Every field below is
-     always written explicitly onto the new block, so a repeatable
-     instance never depends on those globals. js/components/xmltvguide.js
+     js/components/xmltvguide.js's defaultCfg). Layout and channels are
+     always written onto the new block; a left-empty maximum or refresh
+     still follows those globals. js/components/xmltvguide.js
      dispatches on a truthy xmltvurl (or an explicit type:'xmltvguide') -
      see _specialFromReference()'s matching 'xmltvguide' branch, which
      excludes the legacy 'widget_xmltvguide' key. */
@@ -5083,7 +6870,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#xtv-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#xtv-device-title').val() || '')),
+        100
+      );
       var xmltvurl = $.trim(String($('#xtv-device-url').val() || ''));
       if (!xmltvurl || xmltvurl.length > 2048) {
         $message.addClass('text-danger').text(t.invalid_xmltvguide_block_url);
@@ -5127,13 +6917,14 @@ var DashticzDeviceEditor = (function () {
         setting: xmltvurl,
         value: xmltvurl,
       });
-      if (channels.length) {
-        customRows.push({
-          field: 'channels',
-          setting: channels.join(', '),
-          value: channels,
-        });
-      }
+      // Layout and channels are always written, also when 0 / empty: an
+      // omitted value falls back to the global xmltv_* settings of the
+      // Widget Editor. An empty channels list shows every channel.
+      customRows.push({
+        field: 'channels',
+        setting: channels.length ? channels.join(', ') : '[]',
+        value: channels,
+      });
       if (maxitems) {
         var maxitemsInt = parseInt(maxitems, 10) || 0;
         if (maxitemsInt > 0) {
@@ -5144,13 +6935,11 @@ var DashticzDeviceEditor = (function () {
           });
         }
       }
-      if (layout !== '0') {
-        customRows.push({
-          field: 'layout',
-          setting: layout,
-          value: parseInt(layout, 10),
-        });
-      }
+      customRows.push({
+        field: 'layout',
+        setting: layout,
+        value: parseInt(layout, 10) || 0,
+      });
       if (refresh) {
         var refreshInt = parseInt(refresh, 10) || 0;
         if (refreshInt > 0) {
@@ -5184,9 +6973,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('xmltvguideblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('xmltvguideblockpopup'));
       _save();
     });
 
@@ -5279,7 +7068,7 @@ var DashticzDeviceEditor = (function () {
     html +=
       '<input type="number" class="form-control" id="cam-device-refresh" min="0" autocomplete="off"></div>';
     html +=
-      '<div class="mb-3 form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="cam-device-forcerefresh">';
+      '<div class="mb-3 form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="cam-device-forcerefresh" checked>';
     html +=
       '<label class="form-check-label" for="cam-device-forcerefresh">' +
       _esc(t.camera_block_forcerefresh) +
@@ -5307,7 +7096,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#cam-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#cam-device-title').val() || '')),
+        100
+      );
       var imageUrl = $.trim(String($('#cam-device-imageurl').val() || ''));
       if (!imageUrl || imageUrl.length > 2048) {
         $message.addClass('text-danger').text(t.invalid_camera_block_imageurl);
@@ -5350,16 +7142,7 @@ var DashticzDeviceEditor = (function () {
           value: videoUrl,
         });
       }
-      if (height) {
-        var heightInt = parseInt(height, 10) || 0;
-        if (heightInt > 0) {
-          customRows.push({
-            field: 'height',
-            setting: String(heightInt),
-            value: heightInt,
-          });
-        }
-      }
+      var blockHeight = height ? _parseHeight(height) : null;
       if (refresh) {
         var refreshInt = parseInt(refresh, 10) || 0;
         if (refreshInt > 0) {
@@ -5370,11 +7153,12 @@ var DashticzDeviceEditor = (function () {
           });
         }
       }
-      if (forcerefresh) {
+      // The camera adds a cache buster unless the block says forcerefresh: 0.
+      if (!forcerefresh) {
         customRows.push({
           field: 'forcerefresh',
-          setting: 'true',
-          value: true,
+          setting: '0',
+          value: 0,
         });
       }
 
@@ -5389,7 +7173,7 @@ var DashticzDeviceEditor = (function () {
         idx: null,
         title: title,
         width: 3,
-        height: null,
+        height: blockHeight,
         showTitle: quickOptions.showTitle,
         options: {
           icon: quickOptions.icon,
@@ -5400,9 +7184,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('camerablockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('camerablockpopup'));
       _save();
     });
 
@@ -5499,7 +7283,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#nw-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#nw-device-title').val() || '')),
+        100
+      );
       var feed = $.trim(String($('#nw-device-feed').val() || ''));
       if (!feed || feed.length > 2048) {
         $message.addClass('text-danger').text(t.invalid_news_block_feed);
@@ -5569,9 +7356,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('newsblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('newsblockpopup'));
       _save();
     });
 
@@ -5694,6 +7481,52 @@ var DashticzDeviceEditor = (function () {
     return html;
   }
 
+  // Cluster's own devices section for the generic Device Config popup
+  // (_showConfigPopup), reusing the same add/remove picker markup as the
+  // quick-add popup (_showClusterPopup) via _clusterDeviceOptionsHtml/
+  // _clusterPendingListHtml. Add/remove clicks are wired inline in
+  // _showConfigPopup itself (see isClusterBlock there), which mutates the
+  // same clusterPendingDevices array the Save handler reads back.
+  function _clusterFieldsHtml(
+    prefix,
+    t,
+    deviceList,
+    pendingDevices,
+    usageList,
+    mode
+  ) {
+    var html =
+      '<div class="de-cluster-fields" data-cluster-prefix="' +
+      _esc(prefix) +
+      '">';
+    html += '<h6 class="de-section-title">' + _esc(t.cluster_devices) + '</h6>';
+    html += '<div class="d-flex gap-2">';
+    html +=
+      '<select class="form-select" id="' +
+      _esc(prefix) +
+      '-cluster-select">' +
+      _clusterDeviceOptionsHtml(t, deviceList, pendingDevices) +
+      '</select>';
+    html +=
+      '<button type="button" class="btn btn-success btn-sm" id="' +
+      _esc(prefix) +
+      '-cluster-add-btn"><i class="fas fa-plus" aria-hidden="true"></i></button>';
+    html += '</div>';
+    html +=
+      '<div class="form-text" id="' +
+      _esc(prefix) +
+      '-cluster-help">' +
+      _esc(_clusterHelpTextForMode(t, mode)) +
+      '</div>';
+    html +=
+      '<div id="' +
+      _esc(prefix) +
+      '-cluster-pending" class="mt-2">' +
+      _clusterPendingListHtml(t, pendingDevices, usageList) +
+      '</div></div>';
+    return html;
+  }
+
   function _readGraphFields(prefix) {
     var rawDevices = $.trim(
       String($('#' + prefix + '-graph-devices').val() || '')
@@ -5776,7 +7609,10 @@ var DashticzDeviceEditor = (function () {
         .find('.cd-custom-message')
         .removeClass('text-danger')
         .text('');
-      var title = $.trim(String($('#gr-device-title').val() || ''));
+      var title = _cutUtf8(
+        $.trim(String($('#gr-device-title').val() || '')),
+        100
+      );
 
       var graphFields = _readGraphFields('gr');
       if (!graphFields.validDevices) {
@@ -5845,9 +7681,9 @@ var DashticzDeviceEditor = (function () {
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('graphblockpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('graphblockpopup'));
       _save();
     });
 
@@ -5856,6 +7692,1614 @@ var DashticzDeviceEditor = (function () {
     });
     window.bootstrap.Modal.getOrCreateInstance(
       document.getElementById('graphblockpopup')
+    ).show();
+  }
+
+  /* Repeatable F1 block (js/components/f1.js, docs/blocks/specials/f1.rst) -
+     same managedSpecials mechanism as Graph/News above (kind:'special',
+     specialType:'f1'), so any number of independently-configured F1 tiles can
+     be placed on one screen. The tile itself chooses what it shows: the next
+     session ('next') or every session of the next race weekend ('all'), via
+     the icon buttons of _f1FieldsHtml(). Like Graph, it has no `type` of its
+     own: js/components/f1.js dispatches on a truthy f1mode, and every F1
+     setting rides through custom_fields (see _f1CustomRows()). */
+  var F1_URL_EN =
+    'https://files-f1.motorsportcalendars.com/f1-calendar_p1_p2_p3_qualifying_sprint_gp.ics';
+  var F1_URL_NL =
+    'https://files-f1.motorsportcalendars.com/nl/f1-calendar_p1_p2_p3_qualifying_sprint_gp.ics';
+  /* The settings of the F1 and TVgids blocks are tables (F1_SECTION,
+     TVGIDS_SECTION). The fields, reading them back and saving them are all
+     derived from the table by the _setting*() functions below:
+       key     - element id <idPart>-<key>, custom field fieldPrefix + key
+                 (unless `field`), label labelPrefix + key (unless `label`),
+                 help text label + '_help' when that translation exists (or
+                 the `help` key)
+       type    - select | number | text | url | switch | image | color
+       def     - default, as applied by the widget (js/components/f1.js,
+                 js/components/tvgids.js); a default value is left out of the
+                 saved block. null = optional number, empty means the default
+       range   - [min, max, step] of a number field
+       options - select: function (t) -> [[value, label], ...]
+       full    - the field spans both columns */
+  var F1_SECTION = {
+    fieldPrefix: 'f1',
+    idPart: 'f1',
+    labelPrefix: 'f1_block_',
+    fieldClass: 'de-f1-field',
+    // Order of the settings in a saved block, after f1mode.
+    saveOrder:
+      'language urlen urlnl utcoffset pollminutes sessions visibility emptytext hideimage fontsize image',
+    settings: [
+      {
+        key: 'language',
+        type: 'select',
+        def: 'en',
+        options: function () {
+          return [
+            ['en', 'English'],
+            ['nl', 'Nederlands'],
+          ];
+        },
+      },
+      // Optional whole number: empty = the time zone of the browser.
+      { key: 'utcoffset', type: 'number', def: null, range: [-24, 24, 0.25] },
+      { key: 'pollminutes', type: 'number', def: 60, range: [5, 1440, 5] },
+      {
+        key: 'sessions',
+        type: 'select',
+        def: 'all',
+        options: function (t) {
+          return [
+            ['all', t.f1_block_sessions_all],
+            ['sprint_race', t.f1_block_sessions_sprint_race],
+            ['race', t.f1_block_sessions_race],
+          ];
+        },
+      },
+      { key: 'visibility', type: 'number', def: 3, range: [0, 365, 1] },
+      { key: 'emptytext', type: 'text', def: '', max: 200 },
+      { key: 'fontsize', type: 'number', def: null, range: [8, 60, 1] },
+      {
+        key: 'hideimage',
+        type: 'switch',
+        def: false,
+        field: 'hideimageonempty',
+      },
+      { key: 'image', type: 'image', def: '', full: 1 },
+      {
+        key: 'urlen',
+        type: 'url',
+        def: F1_URL_EN,
+        full: 1,
+        label: 'url_en',
+        help: 'url',
+      },
+      { key: 'urlnl', type: 'url', def: F1_URL_NL, full: 1, label: 'url_nl' },
+    ],
+  };
+  var F1_SETTINGS = F1_SECTION.settings;
+
+  function _settingField(section, setting) {
+    return setting.field || section.fieldPrefix + setting.key;
+  }
+
+  // Custom field name (lower case) -> true: the fields a section owns, left
+  // out of the generic Custom fields list.
+  function _settingFieldNames(section, firstField) {
+    var names = {};
+    names[firstField] = true;
+    section.settings.forEach(function (setting) {
+      names[_settingField(section, setting)] = true;
+    });
+    return names;
+  }
+  var F1_FIELDS = _settingFieldNames(F1_SECTION, 'f1mode');
+
+  // A select value if it is one of its options, else the default.
+  function _settingOption(setting, value) {
+    var allowed = setting.options({}).map(function (option) {
+      return option[0];
+    });
+    return allowed.indexOf(value) > -1 ? value : setting.def;
+  }
+
+  // An ordered list of parts ('status,temp,wind'): only known parts, each
+  // once, in the given order; an empty or missing list -> the default.
+  function _settingParts(setting, value) {
+    var allowed = setting.options({}).map(function (option) {
+      return option[0];
+    });
+    var parts = String(value === undefined || value === null ? '' : value)
+      .split(',')
+      .map(function (part) {
+        return $.trim(part);
+      })
+      .filter(function (part, index, list) {
+        return allowed.indexOf(part) > -1 && list.indexOf(part) === index;
+      });
+    return parts.length ? parts.join(',') : setting.def;
+  }
+
+  // '#rrggbb' or 'transparent'; anything else -> the default.
+  function _settingColor(value, def) {
+    var text = $.trim(
+      String(value === undefined || value === null ? '' : value)
+    );
+    if (text.toLowerCase() === 'transparent') return 'transparent';
+    return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : def;
+  }
+
+  // A switch the components read as on: true, 1, 'true', '1' or 'on'
+  // (js/components/f1.js and tvgids.js accept the same forms).
+  function _settingIsOn(raw) {
+    if (raw === true || raw === 1) return true;
+    var text = String(raw).toLowerCase();
+    return text === 'true' || text === '1' || text === 'on';
+  }
+
+  // Rounds to the step of the setting: whole numbers unless the step is
+  // fractional (a time zone offset such as 5.5 or 5.75 stays as it is).
+  function _settingRound(number, range) {
+    var step = range[2] > 0 && range[2] < 1 ? range[2] : 1;
+    var rounded = Math.round(number / step) * step;
+    return Math.min(range[1], Math.max(range[0], rounded));
+  }
+
+  // Stored custom-field rows -> {key: value} of every setting of a section.
+  function _settingsFromRows(section, rows, ownFields) {
+    var stored = {};
+    (rows || []).forEach(function (row) {
+      var field = _normaliseCustomFieldName(row && row.field).toLowerCase();
+      if (ownFields[field]) stored[field] = row.value;
+    });
+    var values = { _stored: stored };
+    section.settings.forEach(function (setting) {
+      var raw = stored[_settingField(section, setting)];
+      if (setting.type === 'select') {
+        values[setting.key] = _settingOption(setting, raw);
+      } else if (setting.type === 'parts') {
+        values[setting.key] = _settingParts(setting, raw);
+      } else if (setting.type === 'number') {
+        values[setting.key] =
+          raw !== undefined && raw !== null
+            ? raw
+            : setting.def === null
+              ? ''
+              : setting.def;
+      } else if (setting.type === 'switch') {
+        values[setting.key] =
+          raw === undefined ? !!setting.def : _settingIsOn(raw);
+      } else if (setting.type === 'color') {
+        values[setting.key] = _settingColor(raw, setting.def);
+      } else {
+        // An empty URL shows its default feed (see _settingHtml).
+        values[setting.key] = String(raw || '');
+      }
+    });
+    return values;
+  }
+
+  function _settingControlHtml(id, setting, value, t) {
+    if (setting.type === 'parts') {
+      // A list of parts to show or hide, in the order of the block; the
+      // enabled parts come first. Dragged by the handle (_wireSettingParts).
+      var enabled = _settingParts(setting, value).split(',');
+      var options = setting.options(t);
+      var ordered = enabled
+        .map(function (key) {
+          return options.filter(function (option) {
+            return option[0] === key;
+          })[0];
+        })
+        .concat(
+          options.filter(function (option) {
+            return enabled.indexOf(option[0]) < 0;
+          })
+        );
+      return (
+        '<ul class="de-parts-list list-unstyled mb-0" id="' +
+        id +
+        '">' +
+        ordered
+          .map(function (option) {
+            return (
+              '<li class="de-parts-item" data-part="' +
+              _esc(option[0]) +
+              '"><span class="de-parts-handle" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>' +
+              '<div class="form-check mb-0"><input class="form-check-input de-parts-check" type="checkbox" id="' +
+              id +
+              '-' +
+              _esc(option[0]) +
+              '"' +
+              (enabled.indexOf(option[0]) > -1 ? ' checked' : '') +
+              '><label class="form-check-label" for="' +
+              id +
+              '-' +
+              _esc(option[0]) +
+              '">' +
+              _esc(option[1]) +
+              '</label></div></li>'
+            );
+          })
+          .join('') +
+        '</ul>'
+      );
+    }
+    if (setting.type === 'select') {
+      return (
+        '<select class="form-select" id="' +
+        id +
+        '">' +
+        setting
+          .options(t)
+          .map(function (option) {
+            return (
+              '<option value="' +
+              _esc(option[0]) +
+              '"' +
+              (String(value) === option[0] ? ' selected' : '') +
+              '>' +
+              _esc(option[1]) +
+              '</option>'
+            );
+          })
+          .join('') +
+        '</select>'
+      );
+    }
+    if (setting.type === 'switch') {
+      return (
+        '<div class="form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="' +
+        id +
+        '"' +
+        (value ? ' checked' : '') +
+        '></div>'
+      );
+    }
+    if (setting.type === 'color') {
+      var transparent = value === 'transparent';
+      return (
+        '<div class="d-flex align-items-center gap-3"><input type="color" class="form-control form-control-color" id="' +
+        id +
+        '" value="' +
+        (transparent ? setting.def : _esc(value)) +
+        '"><div class="form-check form-switch mb-0"><input class="form-check-input de-switch" type="checkbox" id="' +
+        id +
+        '-transparent"' +
+        (transparent ? ' checked' : '') +
+        '><label class="form-check-label" for="' +
+        id +
+        '-transparent">' +
+        _esc(t.tvgids_block_transparent) +
+        '</label></div></div>'
+      );
+    }
+    if (setting.type === 'image') {
+      // Own image picker (_wireF1Fields): the image is shown next to the
+      // text of a Next event tile, in addition to the tile icon.
+      return (
+        '<div class="input-group input-group-sm de-f1-image-row" style="position:relative;">' +
+        '<input type="text" class="form-control de-f1-image-input" id="' +
+        id +
+        '" placeholder="custom/icon.png" value="' +
+        _esc(value) +
+        '" autocomplete="off">' +
+        '<button type="button" class="btn btn-outline-danger de-f1-image-clear" title="' +
+        _esc(t.remove_field) +
+        '"><i class="fas fa-xmark" aria-hidden="true"></i></button>' +
+        '<div class="dropdown-menu dt-custom-image-picker" role="dialog" aria-label="' +
+        _esc(t.custom_images) +
+        '"><div class="dt-custom-image-status"></div>' +
+        '<div class="dt-custom-image-grid"></div></div></div>'
+      );
+    }
+    if (setting.type === 'password') {
+      return (
+        '<input type="password" class="form-control" id="' +
+        id +
+        '" value="' +
+        _esc(String(value)) +
+        '" autocomplete="new-password">'
+      );
+    }
+    if (setting.type === 'device') {
+      // A Domoticz on/off switch, picked from the devices of this dashboard;
+      // a number field when the device list is not available.
+      var switches = _settingSwitchDevices();
+      if (!switches.length) {
+        return (
+          '<input type="number" class="form-control" id="' +
+          id +
+          '" min="0" step="1" value="' +
+          _esc(String(value)) +
+          '" autocomplete="off">'
+        );
+      }
+      if (
+        value &&
+        !switches.some(function (item) {
+          return item[0] === String(value);
+        })
+      ) {
+        switches.unshift([String(value), String(value)]);
+      }
+      return (
+        '<select class="form-select" id="' +
+        id +
+        '"><option value="">-</option>' +
+        switches
+          .map(function (item) {
+            return (
+              '<option value="' +
+              _esc(item[0]) +
+              '"' +
+              (String(value) === item[0] ? ' selected' : '') +
+              '>' +
+              _esc(item[1]) +
+              '</option>'
+            );
+          })
+          .join('') +
+        '</select>'
+      );
+    }
+    var range = setting.range
+      ? ' min="' +
+        setting.range[0] +
+        '" max="' +
+        setting.range[1] +
+        '" step="' +
+        setting.range[2] +
+        '"'
+      : '';
+    return (
+      '<input type="' +
+      (setting.range ? 'number' : 'text') +
+      '" class="form-control" id="' +
+      id +
+      '" value="' +
+      _esc(String(value)) +
+      '"' +
+      range +
+      ' autocomplete="off">'
+    );
+  }
+
+  // [[idx, 'Name (idx)'], ...] of the on/off switches of Domoticz, by name.
+  function _settingSwitchDevices() {
+    var devices = {};
+    try {
+      devices = Domoticz.getAllDevices() || {};
+    } catch (e) {
+      devices = {};
+    }
+    return Object.keys(devices)
+      .filter(function (idx) {
+        return (
+          /^\d+$/.test(idx) &&
+          devices[idx] &&
+          devices[idx].SwitchType === 'On/Off'
+        );
+      })
+      .map(function (idx) {
+        return [idx, (devices[idx].Name || idx) + ' (' + idx + ')'];
+      })
+      .sort(function (a, b) {
+        return a[1].localeCompare(b[1]);
+      });
+  }
+
+  // The label, control and help text of one setting of a section.
+  function _settingHtml(section, prefix, setting, value, t) {
+    var id = _esc(prefix) + '-' + section.idPart + '-' + setting.key;
+    var label = section.labelPrefix + (setting.label || setting.key);
+    var helpKey =
+      section.labelPrefix +
+      (setting.help || setting.label || setting.key) +
+      '_help';
+    if (setting.type === 'url') value = value || setting.def;
+    return (
+      '<div class="' +
+      section.fieldClass +
+      (setting.full ? ' ' + section.fieldClass + '-full' : '') +
+      (setting.type === 'switch' ? ' de-setting-switch' : '') +
+      '"><div class="mb-3"><label class="form-label" for="' +
+      id +
+      '">' +
+      _esc(t[label]) +
+      '</label>' +
+      _settingControlHtml(id, setting, value, t) +
+      (t[helpKey]
+        ? '<div class="form-text">' + _esc(t[helpKey]) + '</div>'
+        : '') +
+      '</div></div>'
+    );
+  }
+
+  // One setting's field -> its value. Numbers are clamped to their range;
+  // anything invalid falls back to the default.
+  function _settingValue(section, prefix, setting) {
+    var $field = $('#' + prefix + '-' + section.idPart + '-' + setting.key);
+    var raw = $.trim(String($field.val() || ''));
+    var range = setting.range || [];
+    if (setting.type === 'select') return _settingOption(setting, raw);
+    if (setting.type === 'parts') {
+      return _settingParts(
+        setting,
+        $field
+          .find('.de-parts-item')
+          .filter(function () {
+            return $(this).find('.de-parts-check').is(':checked');
+          })
+          .map(function () {
+            return $(this).data('part');
+          })
+          .get()
+          .join(',')
+      );
+    }
+    if (setting.type === 'switch') return $field.is(':checked');
+    if (setting.type === 'color') {
+      return $('#' + $field.attr('id') + '-transparent').is(':checked')
+        ? 'transparent'
+        : _settingColor(raw, setting.def);
+    }
+    if (setting.type === 'image') {
+      // A relative path only, no parent directory.
+      return /^[A-Za-z0-9 _.\/-]{0,100}$/.test(raw) && raw.indexOf('..') < 0
+        ? raw
+        : '';
+    }
+    if (setting.type === 'url') return raw || setting.def;
+    if (setting.type === 'device') return /^\d{1,9}$/.test(raw) ? raw : '';
+    if (setting.type === 'number') {
+      var number = parseFloat(raw);
+      if (setting.def === null) {
+        // Optional number: empty (or 0 when 0 is out of range) = the default.
+        return !isNaN(number) && (number > 0 || range[0] < 0)
+          ? _settingRound(number, range)
+          : null;
+      }
+      return isNaN(number) ? setting.def : _settingRound(number, range);
+    }
+    return raw.slice(0, setting.max);
+  }
+
+  // Values -> custom_fields rows, without the default values (the saved block
+  // stays short; the widget applies the same defaults).
+  function _settingRows(section, values) {
+    var rows = [];
+    section.saveOrder.split(' ').forEach(function (key) {
+      var setting = section.settings.filter(function (item) {
+        return item.key === key;
+      })[0];
+      if (values[key] === setting.def) return;
+      rows.push({
+        field: _settingField(section, setting),
+        setting: String(values[key]),
+        value: values[key],
+      });
+    });
+    return rows;
+  }
+
+  // Stored custom-field rows -> the F1 values (mode + every setting key).
+  function _f1ValuesFromRows(rows) {
+    var values = _settingsFromRows(F1_SECTION, rows, F1_FIELDS);
+    values.mode = values._stored.f1mode === 'all' ? 'all' : 'next';
+    delete values._stored;
+    return values;
+  }
+
+  /* The F1 section shared by the quick-add popup and the config popup. Two
+     columns (one on a narrow screen); the mode is picked with the two icon
+     buttons at the top. */
+  function _f1FieldsHtml(prefix, values) {
+    var t = _translations();
+    var v = $.extend(_f1ValuesFromRows([]), values || {});
+    var html =
+      '<div class="de-f1-fields" data-f1-prefix="' + _esc(prefix) + '">';
+    html += '<h6 class="de-section-title">' + _esc(t.f1_block) + '</h6>';
+    html +=
+      '<div class="mb-3"><label class="form-label">' +
+      _esc(t.f1_block_mode) +
+      '</label><div class="btn-group d-flex de-f1-modes" role="group" id="' +
+      _esc(prefix) +
+      '-f1-mode" data-value="' +
+      _esc(v.mode) +
+      '">';
+    [
+      ['next', 'fas fa-flag-checkered', t.f1_block_mode_next],
+      ['all', 'fas fa-list-ul', t.f1_block_mode_all],
+    ].forEach(function (mode) {
+      html +=
+        '<button type="button" class="btn btn-outline-primary flex-fill de-f1-mode' +
+        (v.mode === mode[0] ? ' active' : '') +
+        '" data-mode="' +
+        mode[0] +
+        '" aria-pressed="' +
+        (v.mode === mode[0] ? 'true' : 'false') +
+        '"><i class="' +
+        mode[1] +
+        ' me-1" aria-hidden="true"></i>' +
+        _esc(mode[2]) +
+        '</button>';
+    });
+    html += '</div></div><div class="de-f1-grid">';
+    F1_SETTINGS.forEach(function (setting) {
+      if (setting.key === 'fontsize') return;
+      html += _settingHtml(F1_SECTION, prefix, setting, v[setting.key], t);
+    });
+    return html + '</div></div>';
+  }
+
+  /* Call once after appending markup built with _f1FieldsHtml() above. */
+  function _wireF1Fields(prefix, $popup) {
+    $popup.on('click', '#' + prefix + '-f1-mode .de-f1-mode', function () {
+      var $group = $(this).closest('.de-f1-modes');
+      $group.attr('data-value', String($(this).attr('data-mode')));
+      $group
+        .find('.de-f1-mode')
+        .removeClass('active')
+        .attr('aria-pressed', 'false');
+      $(this).addClass('active').attr('aria-pressed', 'true');
+    });
+
+    // Own image picker (same custom-image grid as the Icon/Image field). The
+    // image is shown next to the text of the Next event tile, in addition to
+    // the tile icon, so it is not the block's own icon/image field. Handlers
+    // stop propagation: the config popup closes every picker on a click
+    // outside its own icon rows.
+    var t = _translations();
+    function closePicker() {
+      $popup
+        .find('.de-f1-image-row .dt-custom-image-picker')
+        .removeClass('show');
+    }
+    $popup.on('click focus', '.de-f1-image-input', function (event) {
+      event.stopImmediatePropagation();
+      var $picker = $(this)
+        .closest('.de-f1-image-row')
+        .find('.dt-custom-image-picker');
+      var selected = String($(this).val() || '');
+      closePicker();
+      $picker.addClass('show');
+      $picker.find('.dt-custom-image-status').show().text(t.loading_images);
+      $picker.find('.dt-custom-image-grid').empty();
+      _loadCustomImages()
+        .done(function (images) {
+          _renderCustomImageGrid($picker, images, selected, t.no_custom_images);
+        })
+        .fail(function () {
+          $picker.find('.dt-custom-image-grid').empty();
+          $picker
+            .find('.dt-custom-image-status')
+            .show()
+            .text(t.custom_images_error);
+        });
+    });
+    $popup.on(
+      'click',
+      '.de-f1-image-row .dt-custom-image-option',
+      function (event) {
+        event.stopImmediatePropagation();
+        $(this)
+          .closest('.de-f1-image-row')
+          .find('.de-f1-image-input')
+          .val(String($(this).attr('data-image-path') || ''));
+        closePicker();
+      }
+    );
+    $popup.on('click', '.de-f1-image-clear', function (event) {
+      event.stopImmediatePropagation();
+      $(this).closest('.de-f1-image-row').find('.de-f1-image-input').val('');
+      closePicker();
+    });
+    $popup.on('click', function (event) {
+      if (!$(event.target).closest('.de-f1-image-row').length) closePicker();
+    });
+  }
+
+  // The F1 section's fields -> F1 values plus validUrls. Numbers are
+  // clamped to their range; anything invalid falls back to the default.
+  function _readF1Fields(prefix) {
+    function $field(key) {
+      return $('#' + prefix + '-f1-' + key);
+    }
+    var f1 = {
+      mode: $field('mode').attr('data-value') === 'all' ? 'all' : 'next',
+    };
+    F1_SETTINGS.forEach(function (setting) {
+      f1[setting.key] = _settingValue(F1_SECTION, prefix, setting);
+    });
+    f1.validUrls =
+      /^https:\/\/\S+$/i.test(f1.urlen) && /^https:\/\/\S+$/i.test(f1.urlnl);
+    return f1;
+  }
+
+  // F1 values -> custom_fields rows, without the default values (the saved
+  // block stays short; js/components/f1.js applies the same defaults).
+  function _f1CustomRows(f1) {
+    return [{ field: 'f1mode', setting: f1.mode, value: f1.mode }].concat(
+      _settingRows(F1_SECTION, f1)
+    );
+  }
+
+  function _showF1Popup() {
+    var t = _translations();
+    $('#f1blockpopup').remove();
+
+    var html =
+      '<div class="modal fade" id="f1blockpopup" tabindex="-1" aria-hidden="true">';
+    html +=
+      '<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">';
+    html +=
+      '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-flag-checkered me-2" aria-hidden="true"></i>' +
+      _esc(t.f1_block) +
+      '</h5>';
+    html +=
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      _esc(t.close) +
+      '"></button></div>';
+    html += '<div class="modal-body">';
+    html += _quickOptionsHtml('f1', {
+      icon: true,
+      iconValue: 'fas fa-flag-checkered',
+      lastUpdate: false,
+      showTitle: true,
+    });
+    html += _f1FontsizeHtml('f1', {});
+    html +=
+      '<div class="mb-3"><label class="form-label" for="f1-device-title">' +
+      _esc(t.html_block_title) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="f1-device-title" autocomplete="off"></div>';
+    html += _f1FieldsHtml('f1', {});
+    html += '<div class="cd-custom-message mt-2" role="status"></div></div>';
+    html +=
+      '<div class="modal-footer">' +
+      _backButtonHtml() +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' +
+      '<i class="fas fa-xmark me-1" aria-hidden="true"></i>' +
+      _esc(t.cancel) +
+      '</button>';
+    html +=
+      '<button type="button" class="btn btn-primary btn-save" id="f1-save-btn"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>' +
+      _esc(t.save) +
+      '</button>';
+    html += '</div></div></div></div>';
+    $('body').append(html);
+    var $popup = $('#f1blockpopup');
+    _wireQuickOptions('f1', $popup);
+    _wireF1Fields('f1', $popup);
+    _wireBackButton('f1blockpopup');
+
+    $('#f1-save-btn').on('click', function () {
+      var $message = $popup
+        .find('.cd-custom-message')
+        .removeClass('text-danger')
+        .text('');
+      var title = $.trim(String($('#f1-device-title').val() || ''));
+      var f1 = _readF1Fields('f1');
+      if (!f1.validUrls) {
+        $message.addClass('text-danger').text(t.invalid_f1_block_url);
+        $('#f1-f1-urlen').trigger('focus');
+        return;
+      }
+
+      var quickOptions = _readQuickOptions('f1');
+      var iconIsImage =
+        quickOptions.icon && quickOptions.iconSource === 'image';
+
+      var customRows = [];
+      if (title)
+        customRows.push({
+          field: 'title',
+          setting: title,
+          value: title,
+          system: true,
+        });
+      if (iconIsImage && quickOptions.iconValue) {
+        customRows.push({
+          field: 'image',
+          setting: quickOptions.iconValue,
+          value: quickOptions.iconValue,
+        });
+      }
+      customRows = customRows.concat(_f1CustomRows(f1));
+
+      var reference = _nextSpecialReference('f1');
+      var orderKey = _specialOrderKey(reference);
+      managedSpecials[orderKey] = {
+        kind: 'special',
+        specialType: 'f1',
+        orderKey: orderKey,
+        reference: reference,
+        definition: {},
+        idx: null,
+        title: title,
+        width: 4,
+        height: null,
+        showTitle: quickOptions.showTitle,
+        options: {
+          icon: quickOptions.icon,
+          iconValue: iconIsImage ? null : quickOptions.iconValue,
+          last_update: quickOptions.lastUpdate,
+        },
+        customFields: customRows,
+        preservedFields: {},
+      };
+      managedOrder.push(orderKey);
+      _hideModal(document.getElementById('f1blockpopup'));
+      _save();
+    });
+
+    $popup.one('hidden.bs.modal', function () {
+      $(this).remove();
+    });
+    window.bootstrap.Modal.getOrCreateInstance(
+      document.getElementById('f1blockpopup')
+    ).show();
+  }
+
+  /* TVgids (js/components/tvgids.js, docs/blocks/specials/tvgids.rst): the
+     channels are picked from their logos, per channel group, in the order
+     they are clicked. Every other setting is derived from this table, as
+     for F1 above:
+       key   - element id <prefix>-tvgids-<key>, custom field 'tvgids' + key,
+               label 'tvgids_block_' + key, help text label + '_help'
+       def   - default, as applied by js/components/tvgids.js; a default
+               value is left out of the saved block
+       range - [min, max, step] of a number field */
+  var TVGIDS_SECTION = {
+    fieldPrefix: 'tvgids',
+    idPart: 'tvgids',
+    labelPrefix: 'tvgids_block_',
+    fieldClass: 'de-tvgids-field',
+    saveOrder:
+      'maxitems columnwidth fontsize pollminutes showpast hidelogo logobg',
+    settings: [
+      { key: 'maxitems', type: 'number', def: 10, range: [0, 200, 1] },
+      { key: 'columnwidth', type: 'number', def: 250, range: [120, 1000, 10] },
+      { key: 'fontsize', type: 'number', def: null, range: [8, 60, 1] },
+      { key: 'pollminutes', type: 'number', def: 60, range: [15, 1440, 5] },
+      { key: 'showpast', type: 'switch', def: false },
+      { key: 'hidelogo', type: 'switch', def: false },
+      // '#rrggbb' or 'transparent': the frame behind each channel logo.
+      { key: 'logobg', type: 'color', def: '#ffffff' },
+    ],
+  };
+  var TVGIDS_SETTINGS = TVGIDS_SECTION.settings;
+  var TVGIDS_FIELDS = _settingFieldNames(TVGIDS_SECTION, 'tvgids');
+
+  var tvgidsChannelsPromise = null;
+
+  // vendor/dashticz/tvgids/channels.json: [{group, channels: [{id, name}]}].
+  function _loadTvgidsChannels() {
+    if (tvgidsChannelsPromise) return tvgidsChannelsPromise;
+    tvgidsChannelsPromise = $.getJSON(
+      settings['dashticz_php_path'] + 'tvgids/channels.json'
+    ).then(function (groups) {
+      return Array.isArray(groups) ? groups : [];
+    });
+    tvgidsChannelsPromise.fail(function () {
+      tvgidsChannelsPromise = null;
+    });
+    return tvgidsChannelsPromise;
+  }
+
+  function _tvgidsChannelList(value) {
+    var seen = {};
+    return String(value || '')
+      .split(',')
+      .map(function (id) {
+        return $.trim(id);
+      })
+      .filter(function (id) {
+        if (!/^[a-z0-9_]{1,40}$/.test(id) || seen[id]) return false;
+        seen[id] = true;
+        return true;
+      });
+  }
+
+  // Stored custom-field rows -> the TVgids values (channels + every key).
+  function _tvgidsValuesFromRows(rows) {
+    var values = _settingsFromRows(TVGIDS_SECTION, rows, TVGIDS_FIELDS);
+    values.channels = _tvgidsChannelList(values._stored.tvgids).join(',');
+    delete values._stored;
+    return values;
+  }
+
+  /* The TVgids section shared by the quick-add popup and the config popup.
+     The tiles are filled by _wireTvgidsFields() once channels.json is in. */
+  function _tvgidsFieldsHtml(prefix, values) {
+    var t = _translations();
+    var v = $.extend(_tvgidsValuesFromRows([]), values || {});
+    var html =
+      '<div class="de-tvgids-fields" data-tvgids-prefix="' +
+      _esc(prefix) +
+      '">';
+    html += '<h6 class="de-section-title">' + _esc(t.tvgids_block) + '</h6>';
+    html +=
+      '<div class="mb-3"><label class="form-label">' +
+      _esc(t.tvgids_block_channels) +
+      '</label><div class="form-text mt-0 mb-2">' +
+      _esc(t.tvgids_block_channels_help) +
+      '</div><input type="hidden" id="' +
+      _esc(prefix) +
+      '-tvgids-channels" value="' +
+      _esc(v.channels) +
+      '"><div class="de-tvgids-picker" id="' +
+      _esc(prefix) +
+      '-tvgids-picker"><div class="form-text">' +
+      _esc(t.loading_images) +
+      '</div></div></div>';
+    html += '<div class="de-tvgids-grid">';
+    TVGIDS_SETTINGS.forEach(function (setting) {
+      if (setting.key === 'fontsize') return;
+      html += _settingHtml(TVGIDS_SECTION, prefix, setting, v[setting.key], t);
+    });
+    return html + '</div></div>';
+  }
+
+  /* Call once after appending markup built with _tvgidsFieldsHtml() above:
+     shows the channel tiles and keeps the hidden channel list (in click
+     order) and the order badges in step with them. */
+  function _wireTvgidsFields(prefix, $popup) {
+    var t = _translations();
+    var $input = $popup.find('#' + prefix + '-tvgids-channels');
+    var $picker = $popup.find('#' + prefix + '-tvgids-picker');
+
+    function showOrder() {
+      var chosen = _tvgidsChannelList($input.val());
+      $picker.find('.de-tvgids-tile').each(function () {
+        var position = chosen.indexOf(String($(this).attr('data-channel')));
+        $(this)
+          .toggleClass('active', position > -1)
+          .attr('aria-pressed', position > -1 ? 'true' : 'false')
+          .find('.de-tvgids-order')
+          .text(position > -1 ? String(position + 1) : '');
+      });
+    }
+
+    _loadTvgidsChannels()
+      .done(function (groups) {
+        var html = '';
+        groups.forEach(function (group) {
+          var channels = Array.isArray(group.channels) ? group.channels : [];
+          if (!channels.length) return;
+          html +=
+            '<div class="de-tvgids-group"><div class="de-tvgids-group-title">' +
+            _esc(t['tvgids_group_' + group.group] || group.group) +
+            '</div><div class="de-tvgids-tiles">';
+          channels.forEach(function (channel) {
+            html +=
+              '<button type="button" class="de-tvgids-tile" data-channel="' +
+              _esc(channel.id) +
+              '" title="' +
+              _esc(channel.name) +
+              '" aria-pressed="false"><img src="img/custom/tvgids/' +
+              _esc(channel.id) +
+              '.png" alt="" loading="lazy"><span class="de-tvgids-tile-name">' +
+              _esc(channel.name) +
+              '</span><span class="de-tvgids-order"></span></button>';
+          });
+          html += '</div></div>';
+        });
+        $picker.html(html);
+        showOrder();
+      })
+      .fail(function () {
+        $picker.html(
+          '<div class="form-text text-danger">' +
+            _esc(t.tvgids_block_channels_error) +
+            '</div>'
+        );
+      });
+
+    // Live preview of the logo frame colour on the channel tiles.
+    function showLogoBg() {
+      var color = $popup.find('#' + prefix + '-tvgids-logobg').val();
+      var transparent = $popup
+        .find('#' + prefix + '-tvgids-logobg-transparent')
+        .is(':checked');
+      $picker.css('--tvgids-logo-bg', transparent ? 'transparent' : color);
+    }
+    $popup.on(
+      'input change',
+      '#' +
+        prefix +
+        '-tvgids-logobg, #' +
+        prefix +
+        '-tvgids-logobg-transparent',
+      showLogoBg
+    );
+    showLogoBg();
+
+    $picker.on('click', '.de-tvgids-tile', function () {
+      var id = String($(this).attr('data-channel'));
+      var chosen = _tvgidsChannelList($input.val());
+      var position = chosen.indexOf(id);
+      if (position > -1) chosen.splice(position, 1);
+      else if (chosen.length < 50) chosen.push(id); // saveblocks.php allows 50
+      $input.val(chosen.join(','));
+      showOrder();
+    });
+  }
+
+  // The TVgids section's fields -> TVgids values. Numbers are clamped to
+  // their range; anything invalid falls back to the default.
+  function _readTvgidsFields(prefix) {
+    function $field(key) {
+      return $('#' + prefix + '-tvgids-' + key);
+    }
+    var channelList = _tvgidsChannelList($field('channels').val());
+    var values = {
+      // More than the 50 saveblocks.php accepts counts as no valid choice.
+      channels: channelList.length > 50 ? '' : channelList.join(','),
+    };
+    TVGIDS_SETTINGS.forEach(function (setting) {
+      values[setting.key] = _settingValue(TVGIDS_SECTION, prefix, setting);
+    });
+    return values;
+  }
+
+  // TVgids values -> custom_fields rows, without the default values.
+  function _tvgidsCustomRows(values) {
+    return [
+      { field: 'tvgids', setting: values.channels, value: values.channels },
+    ].concat(_settingRows(TVGIDS_SECTION, values));
+  }
+
+  function _showTvgidsPopup() {
+    var t = _translations();
+    $('#tvgidsblockpopup').remove();
+
+    var html =
+      '<div class="modal fade" id="tvgidsblockpopup" tabindex="-1" aria-hidden="true">';
+    html +=
+      '<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">';
+    html +=
+      '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-tv me-2" aria-hidden="true"></i>' +
+      _esc(t.tvgids_block) +
+      '</h5>';
+    html +=
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      _esc(t.close) +
+      '"></button></div>';
+    html += '<div class="modal-body">';
+    html += _quickOptionsHtml('tvgids', {
+      icon: true,
+      iconValue: 'fas fa-tv',
+      lastUpdate: false,
+      showTitle: true,
+    });
+    html += _tvgidsFontsizeHtml('tvgids', {});
+    html +=
+      '<div class="mb-3"><label class="form-label" for="tvgids-device-title">' +
+      _esc(t.html_block_title) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="tvgids-device-title" autocomplete="off" value="' +
+      _esc(t.tvgids_block) +
+      '"></div>';
+    html += _tvgidsFieldsHtml('tvgids', {});
+    html += '<div class="cd-custom-message mt-2" role="status"></div></div>';
+    html +=
+      '<div class="modal-footer">' +
+      _backButtonHtml() +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' +
+      '<i class="fas fa-xmark me-1" aria-hidden="true"></i>' +
+      _esc(t.cancel) +
+      '</button>';
+    html +=
+      '<button type="button" class="btn btn-primary btn-save" id="tvgids-save-btn"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>' +
+      _esc(t.save) +
+      '</button>';
+    html += '</div></div></div></div>';
+    $('body').append(html);
+    var $popup = $('#tvgidsblockpopup');
+    _wireQuickOptions('tvgids', $popup);
+    _wireTvgidsFields('tvgids', $popup);
+    _wireBackButton('tvgidsblockpopup');
+
+    $('#tvgids-save-btn').on('click', function () {
+      var $message = $popup
+        .find('.cd-custom-message')
+        .removeClass('text-danger')
+        .text('');
+      var title = _cutUtf8(
+        $.trim(String($('#tvgids-device-title').val() || '')),
+        100
+      );
+      var tvgids = _readTvgidsFields('tvgids');
+      if (!tvgids.channels) {
+        $message.addClass('text-danger').text(t.invalid_tvgids_block_channels);
+        return;
+      }
+
+      var quickOptions = _readQuickOptions('tvgids');
+      var iconIsImage =
+        quickOptions.icon && quickOptions.iconSource === 'image';
+
+      var customRows = [];
+      if (title)
+        customRows.push({
+          field: 'title',
+          setting: title,
+          value: title,
+          system: true,
+        });
+      if (iconIsImage && quickOptions.iconValue) {
+        customRows.push({
+          field: 'image',
+          setting: quickOptions.iconValue,
+          value: quickOptions.iconValue,
+        });
+      }
+      customRows = customRows.concat(_tvgidsCustomRows(tvgids));
+
+      var reference = _nextSpecialReference('tvgids');
+      var orderKey = _specialOrderKey(reference);
+      managedSpecials[orderKey] = {
+        kind: 'special',
+        specialType: 'tvgids',
+        orderKey: orderKey,
+        reference: reference,
+        definition: {},
+        idx: null,
+        title: title,
+        width: 12,
+        height: null,
+        showTitle: quickOptions.showTitle,
+        options: {
+          icon: quickOptions.icon,
+          iconValue: iconIsImage ? null : quickOptions.iconValue,
+          last_update: quickOptions.lastUpdate,
+        },
+        customFields: customRows,
+        preservedFields: {},
+      };
+      managedOrder.push(orderKey);
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('tvgidsblockpopup'));
+      _save();
+    });
+
+    $popup.one('hidden.bs.modal', function () {
+      $(this).remove();
+    });
+    window.bootstrap.Modal.getOrCreateInstance(
+      document.getElementById('tvgidsblockpopup')
+    ).show();
+  }
+
+  /* Fully Kiosk (js/components/fullykiosk.js, docs/blocks/specials/
+     fullykiosk.rst): the connection to the tablet, the charger switch and the
+     charge percentages, all from one settings table like F1 and TVgids above.
+     The block is dispatched on fullymode ('charge'), kept apart from the
+     table, like f1mode. */
+  var FULLY_SECTION = {
+    fieldPrefix: 'fully',
+    idPart: 'fully',
+    labelPrefix: 'fully_block_',
+    fieldClass: 'de-fully-field',
+    saveOrder:
+      'host port password https switch auto startmin startmax stopmin stopmax hardmin hardmax showbattery showcharging showscreen showscreensaver showmotion showbrightness showloadurl fontsize',
+    settings: [
+      { key: 'host', type: 'text', def: '', max: 100 },
+      { key: 'port', type: 'number', def: 2323, range: [1, 65535, 1] },
+      { key: 'password', type: 'password', def: '', max: 100 },
+      { key: 'https', type: 'switch', def: false },
+      { key: 'switch', type: 'device', def: '', full: 1 },
+      { key: 'auto', type: 'switch', def: true, full: 1 },
+      { key: 'startmin', type: 'number', def: 25, range: [1, 100, 1] },
+      { key: 'startmax', type: 'number', def: 30, range: [1, 100, 1] },
+      { key: 'stopmin', type: 'number', def: 80, range: [1, 100, 1] },
+      { key: 'stopmax', type: 'number', def: 90, range: [1, 100, 1] },
+      { key: 'hardmin', type: 'number', def: 15, range: [0, 100, 1] },
+      { key: 'hardmax', type: 'number', def: 95, range: [1, 100, 1] },
+      // The other devices of the plugin, as extra rows of the block.
+      { key: 'showbattery', type: 'switch', def: true },
+      { key: 'showcharging', type: 'switch', def: false },
+      { key: 'showscreen', type: 'switch', def: false },
+      { key: 'showscreensaver', type: 'switch', def: false },
+      { key: 'showmotion', type: 'switch', def: false },
+      { key: 'showbrightness', type: 'switch', def: false },
+      { key: 'showloadurl', type: 'switch', def: false },
+      { key: 'fontsize', type: 'number', def: null, range: [8, 60, 1] },
+    ],
+  };
+  var FULLY_SETTINGS = FULLY_SECTION.settings;
+  var FULLY_FIELDS = _settingFieldNames(FULLY_SECTION, 'fullymode');
+
+  // Stored custom-field rows -> the Fully Kiosk values (every setting key).
+  function _fullyValuesFromRows(rows) {
+    return _settingsFromRows(FULLY_SECTION, rows, FULLY_FIELDS);
+  }
+
+  /* The Fully Kiosk section shared by the quick-add popup and the config
+     popup. */
+  function _fullyFieldsHtml(prefix, values) {
+    var t = _translations();
+    var v = $.extend(_fullyValuesFromRows([]), values || {});
+    var html =
+      '<div class="de-fully-fields" data-fully-prefix="' + _esc(prefix) + '">';
+    html += '<h6 class="de-section-title">' + _esc(t.fully_block) + '</h6>';
+    html += '<div class="de-fully-grid">';
+    FULLY_SETTINGS.forEach(function (setting) {
+      if (setting.key === 'fontsize') return;
+      html += _settingHtml(FULLY_SECTION, prefix, setting, v[setting.key], t);
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+  // The font size field of a section, shown in the Display options below the
+  // icons instead of in the widget's own section (same field id, so the
+  // section's reader finds it as before).
+  function _sectionFontsizeHtml(section, prefix, value) {
+    var setting = section.settings.filter(function (item) {
+      return item.key === 'fontsize';
+    })[0];
+    return (
+      '<div class="de-section-fontsize">' +
+      _settingHtml(section, prefix, setting, value, _translations()) +
+      '</div>'
+    );
+  }
+
+  function _fullyFontsizeHtml(prefix, values) {
+    var v = $.extend(_fullyValuesFromRows([]), values || {});
+    return _sectionFontsizeHtml(FULLY_SECTION, prefix, v.fontsize);
+  }
+
+  function _f1FontsizeHtml(prefix, values) {
+    var v = $.extend(_f1ValuesFromRows([]), values || {});
+    return _sectionFontsizeHtml(F1_SECTION, prefix, v.fontsize);
+  }
+
+  function _tvgidsFontsizeHtml(prefix, values) {
+    var v = $.extend(_tvgidsValuesFromRows([]), values || {});
+    return _sectionFontsizeHtml(TVGIDS_SECTION, prefix, v.fontsize);
+  }
+
+  function _weatherinfoFontsizeHtml(prefix, values) {
+    var v = $.extend(_weatherinfoValuesFromRows([]), values || {});
+    return _sectionFontsizeHtml(WEATHERINFO_SECTION, prefix, v.fontsize);
+  }
+
+  // The Fully Kiosk section's fields -> values. Numbers are clamped to their
+  // range; the minimum percentages are kept at or below the maximum ones.
+  function _readFullyFields(prefix) {
+    var values = {};
+    FULLY_SETTINGS.forEach(function (setting) {
+      values[setting.key] = _settingValue(FULLY_SECTION, prefix, setting);
+    });
+    [
+      ['startmin', 'startmax'],
+      ['stopmin', 'stopmax'],
+    ].forEach(function (pair) {
+      if (values[pair[0]] > values[pair[1]]) {
+        var low = values[pair[1]];
+        values[pair[1]] = values[pair[0]];
+        values[pair[0]] = low;
+      }
+    });
+    // saveblocks.php accepts these host characters only; anything else
+    // counts as no host, so the popup says so before it closes.
+    var plainHost = String(values.host || '')
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+      .replace(/[/?#].*$/, '');
+    if (!/^[A-Za-z0-9.\-_:[\]]{1,253}$/.test(plainHost)) {
+      values.host = '';
+    }
+    return values;
+  }
+
+  // Fully Kiosk values -> custom_fields rows, without the default values.
+  function _fullyCustomRows(values) {
+    return [{ field: 'fullymode', setting: 'charge', value: 'charge' }].concat(
+      _settingRows(FULLY_SECTION, values)
+    );
+  }
+
+  function _showFullykioskPopup() {
+    var t = _translations();
+    $('#fullykioskblockpopup').remove();
+
+    var html =
+      '<div class="modal fade" id="fullykioskblockpopup" tabindex="-1" aria-hidden="true">';
+    html +=
+      '<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">';
+    html +=
+      '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-tablet-screen-button me-2" aria-hidden="true"></i>' +
+      _esc(t.fully_block) +
+      '</h5>';
+    html +=
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      _esc(t.close) +
+      '"></button></div>';
+    html += '<div class="modal-body">';
+    html += _quickOptionsHtml('fullykiosk', {
+      icon: true,
+      iconValue: 'fas fa-tablet-screen-button',
+      lastUpdate: false,
+      showTitle: true,
+    });
+    html += _fullyFontsizeHtml('fullykiosk', {});
+    html +=
+      '<div class="mb-3"><label class="form-label" for="fullykiosk-device-title">' +
+      _esc(t.html_block_title) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="fullykiosk-device-title" autocomplete="off" value="' +
+      _esc(t.fully_block) +
+      '"></div>';
+    html += _fullyFieldsHtml('fullykiosk', {});
+    html += '<div class="cd-custom-message mt-2" role="status"></div></div>';
+    html +=
+      '<div class="modal-footer">' +
+      _backButtonHtml() +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' +
+      '<i class="fas fa-xmark me-1" aria-hidden="true"></i>' +
+      _esc(t.cancel) +
+      '</button>';
+    html +=
+      '<button type="button" class="btn btn-primary btn-save" id="fullykiosk-save-btn"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>' +
+      _esc(t.save) +
+      '</button>';
+    html += '</div></div></div></div>';
+    $('body').append(html);
+    var $popup = $('#fullykioskblockpopup');
+    _wireQuickOptions('fullykiosk', $popup);
+    _wireBackButton('fullykioskblockpopup');
+
+    $('#fullykiosk-save-btn').on('click', function () {
+      var $message = $popup
+        .find('.cd-custom-message')
+        .removeClass('text-danger')
+        .text('');
+      var title = _cutUtf8(
+        $.trim(String($('#fullykiosk-device-title').val() || '')),
+        100
+      );
+      var fully = _readFullyFields('fullykiosk');
+      if (!fully.host) {
+        $message.addClass('text-danger').text(t.invalid_fully_block_host);
+        $('#fullykiosk-fully-host').trigger('focus');
+        return;
+      }
+
+      var quickOptions = _readQuickOptions('fullykiosk');
+      var iconIsImage =
+        quickOptions.icon && quickOptions.iconSource === 'image';
+
+      var customRows = [];
+      if (title)
+        customRows.push({
+          field: 'title',
+          setting: title,
+          value: title,
+          system: true,
+        });
+      if (iconIsImage && quickOptions.iconValue) {
+        customRows.push({
+          field: 'image',
+          setting: quickOptions.iconValue,
+          value: quickOptions.iconValue,
+        });
+      }
+      customRows = customRows.concat(_fullyCustomRows(fully));
+
+      var reference = _nextSpecialReference('fullykiosk');
+      var orderKey = _specialOrderKey(reference);
+      managedSpecials[orderKey] = {
+        kind: 'special',
+        specialType: 'fullykiosk',
+        orderKey: orderKey,
+        reference: reference,
+        definition: {},
+        idx: null,
+        title: title,
+        width: 4,
+        height: null,
+        showTitle: quickOptions.showTitle,
+        options: {
+          icon: quickOptions.icon,
+          iconValue: iconIsImage ? null : quickOptions.iconValue,
+          last_update: quickOptions.lastUpdate,
+        },
+        customFields: customRows,
+        preservedFields: {},
+      };
+      managedOrder.push(orderKey);
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('fullykioskblockpopup'));
+      _save();
+    });
+
+    $popup.one('hidden.bs.modal', function () {
+      $(this).remove();
+    });
+    window.bootstrap.Modal.getOrCreateInstance(
+      document.getElementById('fullykioskblockpopup')
+    ).show();
+  }
+
+  /* Weather Info (js/components/weatherinfo.js, docs/blocks/specials/
+     weatherinfo.rst): the options of the domoticz_weatherinfo plugin - the
+     location, the poll interval, the language and the content of the text -
+     from one settings table like F1 and Fully Kiosk. The block is dispatched
+     on wimode ('forecast'), kept apart from the table, like f1mode. */
+  var WEATHERINFO_SECTION = {
+    fieldPrefix: 'wi',
+    idPart: 'weatherinfo',
+    labelPrefix: 'weatherinfo_block_',
+    fieldClass: 'de-weatherinfo-field',
+    saveOrder: 'lat lon pollminutes language icons parts showrainfall fontsize',
+    settings: [
+      { key: 'lat', type: 'text', def: '', max: 12 },
+      { key: 'lon', type: 'text', def: '', max: 12 },
+      { key: 'pollminutes', type: 'number', def: 5, range: [1, 60, 1] },
+      {
+        key: 'language',
+        type: 'select',
+        def: 'nl',
+        options: function () {
+          return [
+            ['nl', 'Nederlands'],
+            ['en', 'English'],
+          ];
+        },
+      },
+      // The parts of the text, shown in this order: the rain status on a row
+      // of its own, the other parts after each other (plugin: Text device).
+      {
+        key: 'parts',
+        type: 'parts',
+        def: 'status,temp,desc,wind,logo',
+        full: 1,
+        options: function (t) {
+          return [
+            ['status', t.weatherinfo_block_part_status],
+            ['temp', t.weatherinfo_block_part_temp],
+            ['desc', t.weatherinfo_block_part_desc],
+            ['wind', t.weatherinfo_block_part_wind],
+            ['logo', t.weatherinfo_block_part_logo],
+          ];
+        },
+      },
+      {
+        key: 'icons',
+        type: 'select',
+        def: 'animated',
+        options: function (t) {
+          return [
+            ['animated', t.weatherinfo_block_icons_animated],
+            ['emoji', t.weatherinfo_block_icons_emoji],
+          ];
+        },
+      },
+      { key: 'showrainfall', type: 'switch', def: false },
+      { key: 'fontsize', type: 'number', def: null, range: [8, 60, 1] },
+    ],
+  };
+  var WEATHERINFO_SETTINGS = WEATHERINFO_SECTION.settings;
+  var WEATHERINFO_FIELDS = _settingFieldNames(WEATHERINFO_SECTION, 'wimode');
+
+  // Stored custom-field rows -> the Weather Info values (every setting key).
+  function _weatherinfoValuesFromRows(rows) {
+    var values = _settingsFromRows(
+      WEATHERINFO_SECTION,
+      rows,
+      WEATHERINFO_FIELDS
+    );
+    delete values._stored;
+    return values;
+  }
+
+  /* The Weather Info section shared by the quick-add popup and the config
+     popup. */
+  function _weatherinfoFieldsHtml(prefix, values) {
+    var t = _translations();
+    var v = $.extend(_weatherinfoValuesFromRows([]), values || {});
+    var html =
+      '<div class="de-weatherinfo-fields" data-weatherinfo-prefix="' +
+      _esc(prefix) +
+      '">';
+    html +=
+      '<h6 class="de-section-title">' + _esc(t.weatherinfo_block) + '</h6>';
+    html += '<div class="de-weatherinfo-grid">';
+    WEATHERINFO_SETTINGS.forEach(function (setting) {
+      if (setting.key === 'fontsize') return;
+      html += _settingHtml(
+        WEATHERINFO_SECTION,
+        prefix,
+        setting,
+        v[setting.key],
+        t
+      );
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+  // Drag the parts of the text into the order they are shown in.
+  function _wireWeatherinfoFields($popup) {
+    if (!$.fn.sortable) return;
+    $popup.find('.de-parts-list').sortable({
+      handle: '.de-parts-handle',
+      axis: 'y',
+      tolerance: 'pointer',
+      containment: 'parent',
+    });
+  }
+
+  function _readWeatherinfoFields(prefix) {
+    var values = {};
+    WEATHERINFO_SETTINGS.forEach(function (setting) {
+      values[setting.key] = _settingValue(WEATHERINFO_SECTION, prefix, setting);
+    });
+    return values;
+  }
+
+  // The latitude and longitude are both empty (the location of Domoticz) or
+  // both a number within range; returns the message, or '' when valid.
+  function _weatherinfoLocationError(values, t) {
+    var lat = String(values.lat || '').replace(',', '.');
+    var lon = String(values.lon || '').replace(',', '.');
+    if (lat === '' && lon === '') return '';
+    var latNumber = parseFloat(lat);
+    var lonNumber = parseFloat(lon);
+    return lat !== '' &&
+      lon !== '' &&
+      isFinite(lat) &&
+      isFinite(lon) &&
+      Math.abs(latNumber) <= 90 &&
+      Math.abs(lonNumber) <= 180
+      ? ''
+      : t.invalid_weatherinfo_block_location;
+  }
+
+  // Weather Info values -> custom_fields rows, without the default values.
+  function _weatherinfoCustomRows(values) {
+    // A comma is accepted for the decimal point, the block stores a point.
+    values = $.extend({}, values, {
+      lat: String(values.lat || '').replace(',', '.'),
+      lon: String(values.lon || '').replace(',', '.'),
+    });
+    return [{ field: 'wimode', setting: 'forecast', value: 'forecast' }].concat(
+      _settingRows(WEATHERINFO_SECTION, values)
+    );
+  }
+
+  function _showWeatherinfoPopup() {
+    var t = _translations();
+    $('#weatherinfoblockpopup').remove();
+
+    var html =
+      '<div class="modal fade" id="weatherinfoblockpopup" tabindex="-1" aria-hidden="true">';
+    html +=
+      '<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">';
+    html +=
+      '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-cloud-sun-rain me-2" aria-hidden="true"></i>' +
+      _esc(t.weatherinfo_block) +
+      '</h5>';
+    html +=
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      _esc(t.close) +
+      '"></button></div>';
+    html += '<div class="modal-body">';
+    html += _quickOptionsHtml('weatherinfo', {
+      icon: true,
+      iconValue: 'fas fa-cloud-sun-rain',
+      lastUpdate: false,
+      showTitle: true,
+    });
+    html += _weatherinfoFontsizeHtml('weatherinfo', {});
+    html +=
+      '<div class="mb-3"><label class="form-label" for="weatherinfo-device-title">' +
+      _esc(t.html_block_title) +
+      '</label>';
+    html +=
+      '<input type="text" class="form-control" id="weatherinfo-device-title" autocomplete="off" value="' +
+      _esc(t.weatherinfo_block) +
+      '"></div>';
+    html += _weatherinfoFieldsHtml('weatherinfo', {});
+    html += '<div class="cd-custom-message mt-2" role="status"></div></div>';
+    html +=
+      '<div class="modal-footer">' +
+      _backButtonHtml() +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">' +
+      '<i class="fas fa-xmark me-1" aria-hidden="true"></i>' +
+      _esc(t.cancel) +
+      '</button>';
+    html +=
+      '<button type="button" class="btn btn-primary btn-save" id="weatherinfo-save-btn"><i class="fas fa-floppy-disk me-1" aria-hidden="true"></i>' +
+      _esc(t.save) +
+      '</button>';
+    html += '</div></div></div></div>';
+    $('body').append(html);
+    var $popup = $('#weatherinfoblockpopup');
+    _wireQuickOptions('weatherinfo', $popup);
+    _wireWeatherinfoFields($popup);
+    _wireBackButton('weatherinfoblockpopup');
+
+    $('#weatherinfo-save-btn').on('click', function () {
+      var $message = $popup
+        .find('.cd-custom-message')
+        .removeClass('text-danger')
+        .text('');
+      var title = _cutUtf8(
+        $.trim(String($('#weatherinfo-device-title').val() || '')),
+        100
+      );
+      var weatherinfo = _readWeatherinfoFields('weatherinfo');
+      var locationError = _weatherinfoLocationError(weatherinfo, t);
+      if (locationError) {
+        $message.addClass('text-danger').text(locationError);
+        $('#weatherinfo-weatherinfo-lat').trigger('focus');
+        return;
+      }
+
+      var quickOptions = _readQuickOptions('weatherinfo');
+      var iconIsImage =
+        quickOptions.icon && quickOptions.iconSource === 'image';
+
+      var customRows = [];
+      if (title)
+        customRows.push({
+          field: 'title',
+          setting: title,
+          value: title,
+          system: true,
+        });
+      if (iconIsImage && quickOptions.iconValue) {
+        customRows.push({
+          field: 'image',
+          setting: quickOptions.iconValue,
+          value: quickOptions.iconValue,
+        });
+      }
+      customRows = customRows.concat(_weatherinfoCustomRows(weatherinfo));
+
+      var reference = _nextSpecialReference('weatherinfo');
+      var orderKey = _specialOrderKey(reference);
+      managedSpecials[orderKey] = {
+        kind: 'special',
+        specialType: 'weatherinfo',
+        orderKey: orderKey,
+        reference: reference,
+        definition: {},
+        idx: null,
+        title: title,
+        width: 4,
+        height: null,
+        showTitle: quickOptions.showTitle,
+        options: {
+          icon: quickOptions.icon,
+          iconValue: iconIsImage ? null : quickOptions.iconValue,
+          last_update: quickOptions.lastUpdate,
+        },
+        customFields: customRows,
+        preservedFields: {},
+      };
+      managedOrder.push(orderKey);
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('weatherinfoblockpopup'));
+      _save();
+    });
+
+    $popup.one('hidden.bs.modal', function () {
+      $(this).remove();
+    });
+    window.bootstrap.Modal.getOrCreateInstance(
+      document.getElementById('weatherinfoblockpopup')
     ).show();
   }
 
@@ -6023,7 +9467,7 @@ var DashticzDeviceEditor = (function () {
       var iconIsImage =
         iconSource === 'image' && iconValue !== '' && !fullImage;
       var slideButtonDefinition = {
-        title: buttonTitle.slice(0, 100),
+        title: _cutUtf8(buttonTitle, 100),
         slide: slideTarget,
       };
       if (iconIsImage) slideButtonDefinition.image = iconValue.slice(0, 100);
@@ -6037,7 +9481,7 @@ var DashticzDeviceEditor = (function () {
         reference: reference,
         definition: {},
         idx: null,
-        title: buttonTitle.slice(0, 100),
+        title: _cutUtf8(buttonTitle, 100),
         width: 12,
         height: null,
         showTitle: true,
@@ -6052,14 +9496,14 @@ var DashticzDeviceEditor = (function () {
         slideTarget: slideTarget,
         customFields: _deviceCustomFieldRows(
           slideButtonDefinition,
-          buttonTitle.slice(0, 100)
+          _cutUtf8(buttonTitle, 100)
         ),
         preservedFields: {},
       };
       managedOrder.push(orderKey);
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('slidebuttonpopup')
-      ).hide();
+      // The modal fades out; a second click must not add a second block.
+      $(this).prop('disabled', true);
+      _hideModal(document.getElementById('slidebuttonpopup'));
       _save();
     });
 
@@ -6086,6 +9530,9 @@ var DashticzDeviceEditor = (function () {
       return;
     }
     var editor = document.getElementById('deviceeditorpopup');
+    // A second click while the editor is still fading out must not open the
+    // popup twice.
+    if (editor && $(editor).data('de-config-transition')) return;
     var editorModal =
       editor && window.bootstrap && window.bootstrap.Modal
         ? window.bootstrap.Modal.getInstance(editor)
@@ -6097,7 +9544,7 @@ var DashticzDeviceEditor = (function () {
     if (editor && editorModal && $(editor).hasClass('show')) {
       $(editor).data('de-config-transition', true);
       $(editor).one('hidden.bs.modal', showChild);
-      editorModal.hide();
+      _hideModal(editor);
       return;
     }
     showChild();
@@ -6105,6 +9552,7 @@ var DashticzDeviceEditor = (function () {
 
   function _openWidgetConfigPopup(orderKey) {
     var editor = document.getElementById('deviceeditorpopup');
+    if (editor && $(editor).data('de-config-transition')) return;
     var editorModal =
       editor && window.bootstrap && window.bootstrap.Modal
         ? window.bootstrap.Modal.getInstance(editor)
@@ -6113,61 +9561,69 @@ var DashticzDeviceEditor = (function () {
     if (!widget) return;
 
     function openFullWidgetConfig() {
-      DT_function.loadDTScript('js/widgeteditor.js').then(function () {
-        if (
-          !DashticzWidgetEditor ||
-          typeof DashticzWidgetEditor.openConfig !== 'function'
-        ) {
-          _showParentEditor(editor);
-          return;
-        }
-        DashticzWidgetEditor.openConfig(widget.id, {
-          draft: widget.editorDraft || null,
-          onApply: function (result) {
-            if (!result || !result.entry) return;
-            widget.pendingPayload = result.entry;
-            widget.editorDraft = result.draft || null;
-            var draftRows =
-              widget.editorDraft &&
-              widget.editorDraft.blockOptions &&
-              widget.editorDraft.blockOptions.customFields
-                ? widget.editorDraft.blockOptions.customFields
-                : [];
-            draftRows.some(function (row) {
-              if (_normaliseCustomFieldName(row && row.field) !== 'title')
-                return false;
-              widgetTitles[orderKey] = String(row.setting || '');
-              widget.pendingTitleEdited = true;
-              return true;
-            });
-            pendingWidgetSettings = $.extend(
-              {},
-              pendingWidgetSettings,
-              result.configSettings || {}
-            );
-            var entry = result.entry;
-            widgetOptions[orderKey] = $.extend({}, widgetOptions[orderKey], {
-              icon: typeof entry.icon === 'undefined' || entry.icon !== '',
-              iconValue:
-                typeof entry.icon === 'string' && entry.icon !== ''
-                  ? entry.icon
-                  : null,
-              hide_data: entry.hide_data === true,
-              last_update: entry.last_update === true,
-            });
-            widgetTitleVisible[orderKey] = entry.hide_title !== true;
-          },
-          onClose: function () {
+      DT_function.loadDTScript('js/widgeteditor.js').then(
+        function () {
+          if (
+            typeof DashticzWidgetEditor === 'undefined' ||
+            !DashticzWidgetEditor ||
+            typeof DashticzWidgetEditor.openConfig !== 'function'
+          ) {
             _showParentEditor(editor);
-          },
-        });
-      });
+            return;
+          }
+          DashticzWidgetEditor.openConfig(widget.id, {
+            draft: widget.editorDraft || null,
+            onApply: function (result) {
+              if (!result || !result.entry) return;
+              widget.pendingPayload = result.entry;
+              widget.editorDraft = result.draft || null;
+              var draftRows =
+                widget.editorDraft &&
+                widget.editorDraft.blockOptions &&
+                widget.editorDraft.blockOptions.customFields
+                  ? widget.editorDraft.blockOptions.customFields
+                  : [];
+              draftRows.some(function (row) {
+                if (_normaliseCustomFieldName(row && row.field) !== 'title')
+                  return false;
+                widgetTitles[orderKey] = String(row.setting || '');
+                widget.pendingTitleEdited = true;
+                return true;
+              });
+              pendingWidgetSettings = $.extend(
+                {},
+                pendingWidgetSettings,
+                result.configSettings || {}
+              );
+              var entry = result.entry;
+              widgetOptions[orderKey] = $.extend({}, widgetOptions[orderKey], {
+                icon: typeof entry.icon === 'undefined' || entry.icon !== '',
+                iconValue:
+                  typeof entry.icon === 'string' && entry.icon !== ''
+                    ? entry.icon
+                    : null,
+                hide_data: entry.hide_data === true,
+                last_update: entry.last_update === true,
+              });
+              widgetTitleVisible[orderKey] = entry.hide_title !== true;
+            },
+            onClose: function () {
+              _showParentEditor(editor);
+            },
+          });
+        },
+        function () {
+          // widgeteditor.js did not load: bring the Device Editor back instead
+          // of leaving the page without a dialog.
+          _showParentEditor(editor);
+        }
+      );
     }
 
     if (editor && editorModal && $(editor).hasClass('show')) {
       $(editor).data('de-config-transition', true);
       $(editor).one('hidden.bs.modal', openFullWidgetConfig);
-      editorModal.hide();
+      _hideModal(editor);
       return;
     }
     openFullWidgetConfig();
@@ -6176,6 +9632,104 @@ var DashticzDeviceEditor = (function () {
   /* Build the Device Config popup. Switch visibility is not exposed as a
      checkbox here; title text remains available as a typed field, and its
      visibility is exposed via the Title checkbox below. */
+  function _textStyleHtml(options, t) {
+    var fontSizeInput = function (id, label, value) {
+      return (
+        '<span class="d-flex align-items-center gap-2">' +
+        '<label class="mb-0" for="' +
+        id +
+        '">' +
+        _esc(label) +
+        '</label>' +
+        '<input type="number" class="form-control form-control-sm" id="' +
+        id +
+        '" style="width:10ch;flex:0 0 auto;" min="6" max="100" step="1" value="' +
+        _esc(value || '') +
+        '"><span>px</span></span>'
+      );
+    };
+    var alignButtonRow = function (name, current, buttons) {
+      return buttons
+        .map(function (button) {
+          var id = name + '-' + (button.value || 'default');
+          return (
+            '<input type="radio" class="btn-check" name="' +
+            name +
+            '" id="' +
+            id +
+            '" value="' +
+            button.value +
+            '" autocomplete="off"' +
+            (current === button.value ? ' checked' : '') +
+            '><label class="btn btn-outline-secondary btn-sm" for="' +
+            id +
+            '" title="' +
+            _esc(button.label) +
+            '" aria-label="' +
+            _esc(button.label) +
+            '"><i class="fas ' +
+            button.icon +
+            '"></i></label>'
+          );
+        })
+        .join('');
+    };
+    var alignButtons = alignButtonRow(
+      'de-config-textalign',
+      _parseTextAlign(options.textalign),
+      [
+        { value: '', icon: 'fa-ban', label: t.text_align_default },
+        { value: 'left', icon: 'fa-align-left', label: t.text_align_left },
+        {
+          value: 'center',
+          icon: 'fa-align-center',
+          label: t.text_align_center,
+        },
+        { value: 'right', icon: 'fa-align-right', label: t.text_align_right },
+      ]
+    );
+    var valignButtons = alignButtonRow(
+      'de-config-textvalign',
+      _parseTextVAlign(options.textvalign),
+      [
+        { value: '', icon: 'fa-ban', label: t.text_align_default },
+        { value: 'top', icon: 'fa-arrow-up', label: t.text_valign_top },
+        { value: 'middle', icon: 'fa-arrows-v', label: t.text_valign_middle },
+        { value: 'bottom', icon: 'fa-arrow-down', label: t.text_valign_bottom },
+      ]
+    );
+    return (
+      '<div class="mb-3 de-text-style-row">' +
+      '<div class="form-label">' +
+      _esc(t.text_style) +
+      '</div>' +
+      '<div class="d-flex align-items-center gap-3 flex-wrap">' +
+      fontSizeInput(
+        'de-config-fontsize-title',
+        t.text_fontsize_title,
+        options.fontsizeTitle
+      ) +
+      fontSizeInput(
+        'de-config-fontsize-value',
+        t.text_fontsize_value,
+        options.fontsizeValue
+      ) +
+      '<span class="d-flex align-items-center gap-2"><span>' +
+      _esc(t.text_align) +
+      '</span><span class="btn-group de-text-align-group" role="group">' +
+      alignButtons +
+      '</span></span>' +
+      '<span class="d-flex align-items-center gap-2"><span>' +
+      _esc(t.text_valign) +
+      '</span><span class="btn-group de-text-align-group" role="group">' +
+      valignButtons +
+      '</span></span></div>' +
+      '<div class="form-text">' +
+      _esc(t.text_style_help) +
+      '</div></div>'
+    );
+  }
+
   function _showConfigPopup(orderKey, editor, opts) {
     var t = _translations();
     var persistOnly = !!(opts && opts.persistOnly);
@@ -6185,8 +9739,14 @@ var DashticzDeviceEditor = (function () {
     var isTitle = special && special.specialType === 'title';
     var isCustom = special && special.specialType === 'custom';
     var isGroupBlock = special && special.specialType === 'group';
+    var isClusterBlock = special && special.specialType === 'cluster';
     var isLmsBlock = special && special.specialType === 'lms';
     var isGraphBlock = special && special.specialType === 'graph';
+    var isF1Block = special && special.specialType === 'f1';
+    var isTvgidsBlock = special && special.specialType === 'tvgids';
+    var isFullyBlock = special && special.specialType === 'fullykiosk';
+    var isWeatherinfoBlock = special && special.specialType === 'weatherinfo';
+    var isCalendarBlock = special && special.specialType === 'calendar';
     // No Dial/Bar/Slider mode, and a restricted display-options set (see
     // hasDial/configOptions below) - every special except dummy/custom.
     var isNoDialSpecial = !!(
@@ -6241,7 +9801,76 @@ var DashticzDeviceEditor = (function () {
     // Widget Config -> Graph flow. Keep every advanced Graph option in the
     // generic Custom fields list, but remove the five fields managed by the
     // shared Graph section so they are never shown or saved twice.
+    var f1Values = null;
+    if (isF1Block) {
+      // The F1 section owns these fields, so keep them out of the generic
+      // Custom fields list (they would otherwise be shown and saved twice).
+      f1Values = _f1ValuesFromRows(customRows);
+      customRows = customRows.filter(function (row) {
+        return !F1_FIELDS[
+          _normaliseCustomFieldName(row && row.field).toLowerCase()
+        ];
+      });
+    }
+    var tvgidsValues = null;
+    if (isTvgidsBlock) {
+      // Same as F1: the TVgids section owns these fields.
+      tvgidsValues = _tvgidsValuesFromRows(customRows);
+      customRows = customRows.filter(function (row) {
+        return !TVGIDS_FIELDS[
+          _normaliseCustomFieldName(row && row.field).toLowerCase()
+        ];
+      });
+    }
+    var weatherinfoValues = null;
+    if (isWeatherinfoBlock) {
+      // Same as F1: the Weather Info section owns these fields.
+      weatherinfoValues = _weatherinfoValuesFromRows(customRows);
+      customRows = customRows.filter(function (row) {
+        return !WEATHERINFO_FIELDS[
+          _normaliseCustomFieldName(row && row.field).toLowerCase()
+        ];
+      });
+    }
+    var fullyValues = null;
+    if (isFullyBlock) {
+      // Same as F1: the Fully Kiosk section owns these fields.
+      fullyValues = _fullyValuesFromRows(customRows);
+      customRows = customRows.filter(function (row) {
+        return !FULLY_FIELDS[
+          _normaliseCustomFieldName(row && row.field).toLowerCase()
+        ];
+      });
+    }
+    // Calendar's icalurl gets the same dedicated add/remove row builder as
+    // the quick-add popup (_showCalendarPopup), instead of showing the raw
+    // string-or-object value as a generic custom field - besides being a
+    // poor editing experience, the object shape doesn't round-trip through
+    // the generic field's plain text input. See _calendarFieldsHtml above.
+    var calendarSources = null;
+    if (isCalendarBlock) {
+      var icalurlValue = '';
+      customRows.forEach(function (row) {
+        if (
+          _normaliseCustomFieldName(row && row.field).toLowerCase() ===
+          'icalurl'
+        )
+          icalurlValue = row.value;
+      });
+      calendarSources = _calendarSourcesFromIcalurl(icalurlValue);
+      customRows = customRows.filter(function (row) {
+        return (
+          _normaliseCustomFieldName(row && row.field).toLowerCase() !==
+          'icalurl'
+        );
+      });
+    }
     var graphFields = null;
+    // What the popup shows for graph/legend/groupBy, and what CONFIG.js had:
+    // a value the popup cannot represent (legend as an object, graph as an
+    // array, an unknown groupBy) is written back unless the user changes it.
+    var graphInitial = null;
+    var graphOriginal = {};
     if (isGraphBlock) {
       var graphValues = {};
       customRows.forEach(function (row) {
@@ -6258,6 +9887,19 @@ var DashticzDeviceEditor = (function () {
         legend: graphValues.legend === true,
         height: special.height,
       };
+      graphOriginal = {
+        graph: graphValues.graph,
+        legend: graphValues.legend,
+        groupby: graphValues.groupby,
+      };
+      graphInitial = {
+        graphType: graphFields.graphType,
+        legend: graphFields.legend,
+        groupBy:
+          ['hour', 'day', 'week', 'month'].indexOf(graphFields.groupBy) < 0
+            ? ''
+            : graphFields.groupBy,
+      };
       customRows = customRows.filter(function (row) {
         var field = _normaliseCustomFieldName(row && row.field).toLowerCase();
         return !{
@@ -6266,6 +9908,95 @@ var DashticzDeviceEditor = (function () {
           legend: true,
           groupby: true,
         }[field];
+      });
+    }
+
+    // Cluster's 'devices' (and optional 'usage') fields get the same
+    // add/remove device picker as the quick-add popup (_showClusterPopup),
+    // rather than showing the raw idx array/map as editable generic custom
+    // fields - which, besides being a poor editing experience, collided
+    // with 'devices' being reserved below (customKeys.devices) and made
+    // every save fail with "duplicate field", leaving a saved Cluster
+    // block impossible to edit.
+    var clusterDeviceList = null;
+    var clusterUsageList = null;
+    var clusterPendingDevices = [];
+    var clusterMode = '';
+    var clusterSwitchScaleValue = '';
+    var clusterFontSizeValue = '';
+    if (isClusterBlock) {
+      var clusterValues = {};
+      customRows.forEach(function (row) {
+        var field = _normaliseCustomFieldName(row && row.field).toLowerCase();
+        if (field) clusterValues[field] = row.value;
+      });
+      clusterMode =
+        clusterValues.mode === 'temperature' || clusterValues.mode === 'other'
+          ? clusterValues.mode
+          : '';
+      clusterSwitchScaleValue =
+        typeof clusterValues.switchscale === 'number'
+          ? String(clusterValues.switchscale)
+          : '';
+      clusterFontSizeValue =
+        typeof clusterValues.fontsize === 'number'
+          ? String(clusterValues.fontsize)
+          : '';
+      var clusterDeviceIdxList = Array.isArray(clusterValues.devices)
+        ? clusterValues.devices
+        : [];
+      var clusterUsageMap =
+        clusterValues.usage && typeof clusterValues.usage === 'object'
+          ? clusterValues.usage
+          : {};
+      var clusterTitlesMap =
+        clusterValues.titles && typeof clusterValues.titles === 'object'
+          ? clusterValues.titles
+          : {};
+      var clusterIconsMap =
+        clusterValues.icons && typeof clusterValues.icons === 'object'
+          ? clusterValues.icons
+          : {};
+      var allDevicesForCluster = Domoticz.getAllDevices();
+      // Hand-written lists may hold '12' as text: use whole numbers only.
+      clusterDeviceIdxList = clusterDeviceIdxList
+        .map(function (idx) {
+          var number = parseInt(idx, 10);
+          return String(number) === String(idx).trim() ? number : 0;
+        })
+        .filter(function (idx) {
+          return idx > 0;
+        });
+      clusterPendingDevices = clusterDeviceIdxList.map(function (idx) {
+        var live = allDevicesForCluster ? allDevicesForCluster[idx] : null;
+        var usageIdx = parseInt(clusterUsageMap[idx], 10) || null;
+        var customTitle = String(clusterTitlesMap[idx] || '');
+        return {
+          idx: idx,
+          name: (live && live.Name) || String(idx),
+          usageIdx: usageIdx,
+          title: customTitle,
+          icon: String(clusterIconsMap[idx] || ''),
+        };
+      });
+      clusterDeviceList =
+        clusterMode === 'temperature'
+          ? _clusterTemperatureDeviceList()
+          : clusterMode === 'other'
+            ? _clusterOtherDeviceList()
+            : _clusterAvailableDeviceList();
+      clusterUsageList = _clusterUsageDeviceList();
+      customRows = customRows.filter(function (row) {
+        var field = _normaliseCustomFieldName(row && row.field).toLowerCase();
+        return (
+          field !== 'devices' &&
+          field !== 'usage' &&
+          field !== 'mode' &&
+          field !== 'titles' &&
+          field !== 'switchscale' &&
+          field !== 'fontsize' &&
+          field !== 'icons'
+        );
       });
     }
 
@@ -6318,7 +10049,11 @@ var DashticzDeviceEditor = (function () {
       (hasLiveDevice ? 'device' : 'special') +
       '" tabindex="-1" aria-hidden="true">';
     html +=
-      '<div class="modal-dialog modal-dialog-centered de-config-dialog"><div class="modal-content">';
+      '<div class="modal-dialog modal-dialog-centered de-config-dialog' +
+      (isF1Block || isTvgidsBlock || isFullyBlock || isWeatherinfoBlock
+        ? ' modal-lg'
+        : '') +
+      '"><div class="modal-content">';
     html +=
       '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-cog me-2" aria-hidden="true"></i>' +
       _esc(t.device_config) +
@@ -6344,7 +10079,8 @@ var DashticzDeviceEditor = (function () {
       if (!isSpecial && ck) {
         barDeviceIdx = _parseCk(ck).idx;
       } else if (isSpecial && isCustom && special.idx) {
-        barDeviceIdx = special.idx;
+        var customSubdevice = _customSubdevice(special.idx);
+        barDeviceIdx = customSubdevice ? customSubdevice.idx : special.idx;
       }
     }
     var barLiveDevice = barDeviceIdx
@@ -6401,6 +10137,34 @@ var DashticzDeviceEditor = (function () {
     });
     if (inverseRowIndex > -1) customRows.splice(inverseRowIndex, 1);
 
+    // Compact layout is a plain per-device switch for Selector Switches that
+    // render as buttons (SelectorStyle 0), stored as the compactSelector
+    // custom field. Like needle above it is shown here instead of in Custom
+    // fields. An already-saved value stays editable even when the live device
+    // is temporarily unavailable.
+    // Text size/alignment (Device Config -> Text) - only for blocks that
+    // render through js/blocks.js deviceUpdateHandler(): plain Domoticz
+    // devices and idx-backed Custom devices. The three fields are protected
+    // custom-field names, so they never show up in Custom fields as well.
+    var supportsTextStyle = !isSpecial || (isCustom && !!special.idx);
+    var supportsCompactSelector =
+      (!isSpecial || (isCustom && !!special.idx)) &&
+      hasDial &&
+      ((!!barLiveDevice &&
+        barLiveDevice.SwitchType === 'Selector' &&
+        barLiveDevice.SelectorStyle != 1) ||
+        options.compactSelector === true);
+    if (supportsCompactSelector) {
+      var compactRowIndex = customRows.findIndex(function (row) {
+        return String(row.field || '').toLowerCase() === 'compactselector';
+      });
+      if (compactRowIndex > -1) customRows.splice(compactRowIndex, 1);
+      var compactIconsRowIndex = customRows.findIndex(function (row) {
+        return String(row.field || '').toLowerCase() === 'compacticons';
+      });
+      if (compactIconsRowIndex > -1) customRows.splice(compactIconsRowIndex, 1);
+    }
+
     var visualMode =
       options.needle === true
         ? 'needle'
@@ -6413,11 +10177,23 @@ var DashticzDeviceEditor = (function () {
     // it's now an independent toggle living in .de-config-options-icons
     // below (#195), same as Data/Updated/Title/Background, so every device
     // gets it (previously only Group/HTML/LMS/Separator specials did).
+    // A slide button and an LMS block never write last_update (see
+    // _buildDevicePayload), so the Updated toggle is not offered for them.
+    var writesNoLastUpdate = !!(
+      special &&
+      (special.specialType === 'slidebutton' || special.specialType === 'lms')
+    );
     var configOptions = isTitle
       ? ['icon', 'show_title']
-      : isNoDialSpecial
-        ? ['icon', 'last_update', 'show_title']
-        : ['icon', 'hide_data', 'last_update', 'show_title'];
+      : writesNoLastUpdate
+        ? ['icon', 'show_title']
+        : isNoDialSpecial
+          ? ['icon', 'last_update', 'show_title']
+          : ['icon', 'hide_data', 'last_update', 'show_title'];
+    // Reverse swaps which state dims the icon/image. Same block kinds as the
+    // Text section: only blocks rendered by js/blocks.js (plain devices and
+    // idx-backed Custom devices) have an On/Off state to dim.
+    if (supportsTextStyle) configOptions.push('reverseicon');
     html += '<h6 class="de-section-title">' + _esc(t.display_options) + '</h6>';
 
     // Icon/Data/Updated/Title/Background: independent toggle buttons, never
@@ -6430,6 +10206,7 @@ var DashticzDeviceEditor = (function () {
       hide_data: 'fas fa-align-left',
       last_update: 'fas fa-clock',
       show_title: 'fas fa-heading',
+      reverseicon: 'fas fa-adjust',
     };
     var optionsHtml = '';
     configOptions.forEach(function (option) {
@@ -6456,7 +10233,7 @@ var DashticzDeviceEditor = (function () {
         '" aria-pressed="' +
         (checked ? 'true' : 'false') +
         '" title="' +
-        _esc(t[option]) +
+        _esc(t[option + '_help'] || t[option]) +
         '" style="min-width:72px;">' +
         '<i class="' +
         OPTION_ICONS[option] +
@@ -6526,6 +10303,11 @@ var DashticzDeviceEditor = (function () {
       html += '</div>';
     }
     html += '</div>';
+    if (isFullyBlock) html += _fullyFontsizeHtml('de-config', fullyValues);
+    if (isF1Block) html += _f1FontsizeHtml('de-config', f1Values);
+    if (isTvgidsBlock) html += _tvgidsFontsizeHtml('de-config', tvgidsValues);
+    if (isWeatherinfoBlock)
+      html += _weatherinfoFontsizeHtml('de-config', weatherinfoValues);
 
     if (hasDial) {
       var currentBarSteps =
@@ -6581,11 +10363,42 @@ var DashticzDeviceEditor = (function () {
         '<div class="form-text">' + _esc(t.dial_inverse_help) + '</div></div>';
     }
 
+    if (supportsCompactSelector) {
+      html += '<div class="mb-3 de-compact-selector-row">';
+      html +=
+        '<label class="form-check form-switch"><input class="form-check-input de-switch" type="checkbox" id="de-config-compact-selector"' +
+        (options.compactSelector === true ? ' checked' : '') +
+        '>' +
+        '<span class="form-check-label">' +
+        _esc(t.compact_selector) +
+        '</span></label>';
+      html +=
+        '<div class="form-text">' + _esc(t.compact_selector_help) + '</div>';
+      var compactLevels = _selectorLevels(barLiveDevice);
+      if (compactLevels.length) {
+        html +=
+          '<div class="mt-2 de-compact-icons' +
+          (options.compactSelector === true ? '' : ' d-none') +
+          '"><div class="form-label small">' +
+          _esc(t.compact_icons) +
+          '</div>' +
+          _compactIconRowsHtml(compactLevels, options.compactIcons, t) +
+          '</div>';
+      }
+      html += '</div>';
+    }
+
+    if (supportsTextStyle) {
+      html += _textStyleHtml(options, t);
+    }
+
     if (!isTitle) {
       html += '<div class="alert alert-info de-dial-hint d-none" role="note">';
       html += _esc(t.dial_hint) + ' ';
       html +=
-        '<a href="https://dashticz.readthedocs.io/en/beta/blocks/specials/dial.html" target="_blank" rel="noopener">' +
+        '<a href="' +
+        DT_function.docsUrl('blocks/specials/dial.html') +
+        '" target="_blank" rel="noopener">' +
         _esc(t.dial_hint_link) +
         '</a>';
       html += '</div>';
@@ -6599,26 +10412,35 @@ var DashticzDeviceEditor = (function () {
       // placeholder forever, since the device data subscription for the old
       // idx never resolves, which also means the icon/title never render
       // (both are only painted once real device data arrives).
+      // Only a real Multi Device (with value rows) has a "main" IDX that
+      // other rows fall back to; any other custom-keyed block - including a
+      // plain device the grid Device Editor stored under a named key - just
+      // has the IDX of its own Domoticz device (or variable).
       html +=
         '<div class="mb-3"><label class="form-label" for="de-config-idx">' +
-        _esc(t.multi_device_idx) +
+        _esc(multiDeviceValues ? t.multi_device_idx : t.custom_device_idx) +
         '</label>';
       html +=
         '<input type="text" inputmode="numeric" class="form-control" ' +
-        'id="de-config-idx" placeholder="123, or v3 for a variable" value="' +
+        'id="de-config-idx" placeholder="123, s3 or v3" value="' +
         _esc(special.idx || '') +
         '">';
       html +=
         '<div class="form-text">' +
-        _esc(t.multi_device_idx_help) +
+        _esc(
+          multiDeviceValues ? t.multi_device_idx_help : t.custom_device_idx_help
+        ) +
         '</div></div>';
     } else if (isGroupBlock) {
       html +=
         '<div class="mb-3"><label class="form-label" for="de-config-idx">' +
         _esc(t.group_idx) +
         '</label>';
+      // A text input, not type="number": it must also show and keep the
+      // documented 's12' group/scene form (see _isSceneIdx()).
       html +=
-        '<input type="number" min="1" step="1" class="form-control" id="de-config-idx" value="' +
+        '<input type="text" inputmode="numeric" class="form-control" ' +
+        'id="de-config-idx" placeholder="12, or s12" value="' +
         _esc(special.idx || '') +
         '">';
       html +=
@@ -6646,12 +10468,39 @@ var DashticzDeviceEditor = (function () {
       });
     } else if (isGraphBlock) {
       html += _graphFieldsHtml('de-config', graphFields);
+    } else if (isCalendarBlock) {
+      html += _calendarFieldsHtml('de-config', calendarSources, t);
+    } else if (isClusterBlock) {
+      // Unlike the quick-add popup, mode is locked here (see the 'locked'
+      // arg below) and never changes, so the switch-size field it embeds
+      // (see _clusterModeButtonsHtml) never needs the create popup's
+      // re-render-on-toggle handling.
+      html += _clusterModeButtonsHtml(
+        'de-config',
+        t,
+        clusterMode,
+        true,
+        clusterSwitchScaleValue,
+        clusterFontSizeValue
+      );
+      html += _clusterFieldsHtml(
+        'de-config',
+        t,
+        clusterDeviceList,
+        clusterPendingDevices,
+        _clusterUsesSwitchRows(clusterMode) ? clusterUsageList : null,
+        clusterMode
+      );
     }
     html +=
       '<div class="de-custom-fields-section"><h6 class="de-section-title mt-3">' +
       _esc(t.custom_fields) +
       '</h6>';
     html += '<p class="form-text">' + _esc(t.custom_fields_help) + '</p>';
+    var originalFieldNames = {};
+    customRows.forEach(function (row) {
+      originalFieldNames[String((row && row.field) || '')] = true;
+    });
     html += '<div class="de-custom-fields">';
     customRows.forEach(function (row) {
       html += _customFieldRowHtml(row);
@@ -6673,6 +10522,12 @@ var DashticzDeviceEditor = (function () {
       html += '</div></div>';
     }
     html += '</div>';
+    // After the (Title/Icon/Image) custom fields, so those stay at the top.
+    if (isF1Block) html += _f1FieldsHtml('de-config', f1Values);
+    if (isTvgidsBlock) html += _tvgidsFieldsHtml('de-config', tvgidsValues);
+    if (isFullyBlock) html += _fullyFieldsHtml('de-config', fullyValues);
+    if (isWeatherinfoBlock)
+      html += _weatherinfoFieldsHtml('de-config', weatherinfoValues);
     html +=
       '<div class="de-config-message" role="status"></div></div><div class="modal-footer">';
     html +=
@@ -6689,7 +10544,165 @@ var DashticzDeviceEditor = (function () {
     $('body').append(html);
 
     var $popup = $('#de-config-popup');
+    // Whether the user actually interacted with the icon controls this time
+    // the popup is open - see the generatedIcon skip-check in the save
+    // handler below, which relies on this to tell "the pre-filled Icon
+    // field still shows its untouched suggestion" (never persist, so
+    // opening/saving any *other* field on a block without an icon does not
+    // silently give it one) apart from "the user enabled Icon or typed a
+    // value that happens to match the suggestion" (persist - a deliberate
+    // choice, even one that matches the suggestion by coincidence).
+    var iconFieldTouched = false;
     if (isLmsBlock) _wireLmsFields('de-config', $popup);
+    if (isF1Block) _wireF1Fields('de-config', $popup);
+    if (isTvgidsBlock) _wireTvgidsFields('de-config', $popup);
+    if (isWeatherinfoBlock) _wireWeatherinfoFields($popup);
+    if (isCalendarBlock)
+      _wireCalendarFields('de-config', $popup, calendarSources, t);
+    if (isClusterBlock) {
+      function clusterEditPendingListHtml() {
+        return _clusterPendingListHtml(
+          t,
+          clusterPendingDevices,
+          _clusterUsesSwitchRows(clusterMode) ? clusterUsageList : null
+        );
+      }
+      _wireClusterSort(
+        $popup.find('#de-config-cluster-pending'),
+        function () {
+          return clusterPendingDevices;
+        },
+        function (list) {
+          clusterPendingDevices = list;
+        }
+      );
+      $popup.on('click', '#de-config-cluster-add-btn', function () {
+        var $select = $popup.find('#de-config-cluster-select');
+        var idx = parseInt($select.val(), 10);
+        if (!(idx > 0)) return;
+        var selectedOption = $select.find('option:selected');
+        var name = selectedOption.attr('data-name') || String(idx);
+        clusterPendingDevices.push({ idx: idx, name: name, icon: 'auto' });
+        $select.html(
+          _clusterDeviceOptionsHtml(t, clusterDeviceList, clusterPendingDevices)
+        );
+        $popup
+          .find('#de-config-cluster-pending')
+          .html(clusterEditPendingListHtml());
+      });
+      $popup.on(
+        'click',
+        '#de-config-cluster-pending .cl-icon-toggle',
+        function () {
+          var $panel = $(this).siblings('.cl-icon-panel');
+          $popup.find('.cl-icon-panel').not($panel).addClass('d-none');
+          $panel.toggleClass('d-none');
+        }
+      );
+      $popup.on(
+        'click',
+        '#de-config-cluster-pending .cl-icon-choice',
+        function () {
+          var idx = parseInt($(this).attr('data-idx'), 10);
+          var target = clusterPendingDevices.find(function (d) {
+            return d.idx === idx;
+          });
+          if (target) target.icon = String($(this).attr('data-icon') || '');
+          $popup
+            .find('#de-config-cluster-pending')
+            .html(clusterEditPendingListHtml());
+        }
+      );
+      $popup.on('click', function (event) {
+        if (!$(event.target).closest('.cl-icon-toggle, .cl-icon-panel').length)
+          $popup.find('.cl-icon-panel').addClass('d-none');
+      });
+      $popup.on(
+        'click',
+        '#de-config-cluster-pending .cl-remove-btn',
+        function () {
+          var idx = parseInt($(this).attr('data-idx'), 10);
+          clusterPendingDevices = clusterPendingDevices.filter(function (d) {
+            return d.idx !== idx;
+          });
+          $popup
+            .find('#de-config-cluster-select')
+            .html(
+              _clusterDeviceOptionsHtml(
+                t,
+                clusterDeviceList,
+                clusterPendingDevices
+              )
+            );
+          $popup
+            .find('#de-config-cluster-pending')
+            .html(clusterEditPendingListHtml());
+        }
+      );
+      $popup.on(
+        'change',
+        '#de-config-cluster-pending .cl-usage-select',
+        function () {
+          var idx = parseInt($(this).attr('data-idx'), 10);
+          var usageIdx = parseInt($(this).val(), 10) || null;
+          var target = clusterPendingDevices.find(function (d) {
+            return d.idx === idx;
+          });
+          if (target) target.usageIdx = usageIdx;
+        }
+      );
+      $popup.on(
+        'input',
+        '#de-config-cluster-pending .cl-name-input',
+        function () {
+          var idx = parseInt($(this).attr('data-idx'), 10);
+          var title = _cutUtf8($.trim(String($(this).val() || '')), 100);
+          var target = clusterPendingDevices.find(function (d) {
+            return d.idx === idx;
+          });
+          if (target) target.title = title;
+        }
+      );
+      $popup.on('click', '.cl-mode-button', function () {
+        // Always disabled here (see _clusterModeButtonsHtml's locked
+        // param) - this popup only ever edits an already-saved cluster.
+        if ($(this).prop('disabled')) return;
+        var mode = String($(this).attr('data-cluster-mode') || '');
+        if (mode === clusterMode) return;
+        clusterMode = mode;
+        $popup.find('.cl-mode-button').each(function () {
+          var active = String($(this).attr('data-cluster-mode') || '') === mode;
+          $(this)
+            .toggleClass('active', active)
+            .attr('aria-pressed', active ? 'true' : 'false');
+        });
+        // Switch and temperature device sets don't overlap - a pick made
+        // under the previous mode would no longer make sense, so clear it
+        // rather than leave a stale, now-invalid mix.
+        clusterPendingDevices = [];
+        clusterDeviceList =
+          clusterMode === 'temperature'
+            ? _clusterTemperatureDeviceList()
+            : clusterMode === 'other'
+              ? _clusterOtherDeviceList()
+              : _clusterAvailableDeviceList();
+        $popup
+          .find('#de-config-cluster-select')
+          .html(
+            _clusterDeviceOptionsHtml(
+              t,
+              clusterDeviceList,
+              clusterPendingDevices
+            )
+          );
+        $popup
+          .find('#de-config-cluster-pending')
+          .html(clusterEditPendingListHtml());
+        $popup
+          .find('#de-config-cluster-help')
+          .text(_clusterHelpTextForMode(t, clusterMode));
+      });
+    }
     function refreshCustomFieldButtons() {
       var removable = $popup.find(
         '.de-custom-field-row:not(.de-system-field-row)'
@@ -6821,12 +10834,14 @@ var DashticzDeviceEditor = (function () {
         .toggleClass('active', active)
         .attr('aria-pressed', active ? 'true' : 'false');
       if (String($(this).attr('data-option')) === 'icon') {
+        iconFieldTouched = true;
         if (active) ensureIconFieldRow();
         refreshCustomFieldButtons();
         refreshIconFieldVisibility();
       }
     });
     $popup.on('change', '.de-icon-source', function () {
+      iconFieldTouched = true;
       var $row = $(this).closest('.de-icon-field-row');
       var useImage = $(this).val() === 'image';
       var $setting = $row.find('.de-custom-field-setting');
@@ -6839,6 +10854,13 @@ var DashticzDeviceEditor = (function () {
       closeCustomImagePickers();
     });
     $popup.on(
+      'input change',
+      '.de-icon-field-row .de-custom-field-setting',
+      function () {
+        iconFieldTouched = true;
+      }
+    );
+    $popup.on(
       'click focus',
       '.de-icon-field-row .de-custom-field-setting',
       function () {
@@ -6846,6 +10868,7 @@ var DashticzDeviceEditor = (function () {
       }
     );
     $popup.on('click', '.dt-custom-image-option', function () {
+      iconFieldTouched = true;
       var $row = $(this).closest('.de-icon-field-row');
       $row
         .find('.de-custom-field-setting')
@@ -6860,6 +10883,41 @@ var DashticzDeviceEditor = (function () {
       )
         return;
       closeCustomImagePickers();
+    });
+    $popup.on('change', '#de-config-compact-selector', function () {
+      $popup
+        .find('.de-compact-icons')
+        .toggleClass('d-none', !$(this).prop('checked'));
+    });
+    $popup.on('click', '.de-compact-icon-toggle', function () {
+      var $panel = $(this)
+        .closest('.de-compact-icon-row')
+        .find('.de-compact-icon-panel');
+      $popup.find('.de-compact-icon-panel').not($panel).addClass('d-none');
+      $panel.toggleClass('d-none');
+    });
+    $popup.on('click', function (event) {
+      if (
+        !$(event.target).closest(
+          '.de-compact-icon-toggle, .de-compact-icon-panel'
+        ).length
+      )
+        $popup.find('.de-compact-icon-panel').addClass('d-none');
+    });
+    $popup.on('click', '.de-compact-icon-choice', function () {
+      var $row = $(this).closest('.de-compact-icon-row');
+      var icon = String($(this).attr('data-icon') || '');
+      $row.find('.de-compact-icon-value').val(icon);
+      $row.find('.de-compact-icon-choice').removeClass('active');
+      $(this).addClass('active');
+      _refreshCompactIconRow($row, t);
+      // A custom class still needs typing; every other choice is final.
+      if (icon === '__custom__')
+        $row.find('.de-compact-icon-custom').trigger('focus');
+      else $row.find('.de-compact-icon-panel').addClass('d-none');
+    });
+    $popup.on('input', '.de-compact-icon-custom', function () {
+      _refreshCompactIconRow($(this).closest('.de-compact-icon-row'), t);
     });
     $popup.on('click', '.de-visual-mode-button', function () {
       if ($(this).prop('disabled')) return;
@@ -6901,11 +10959,44 @@ var DashticzDeviceEditor = (function () {
       // generic custom field, so a hand-typed 'values' field name in the
       // generic list must still be rejected as a duplicate.
       var customKeys = multiDeviceValues ? { values: true } : {};
-      if (isGraphBlock) {
+      if (isGraphBlock || isClusterBlock) {
         customKeys.devices = true;
+      }
+      if (isClusterBlock) {
+        customKeys.usage = true;
+        customKeys.mode = true;
+        customKeys.titles = true;
+        customKeys.icons = true;
+        customKeys.switchscale = true;
+        customKeys.fontsize = true;
+      }
+      if (isF1Block) {
+        Object.keys(F1_FIELDS).forEach(function (key) {
+          customKeys[key] = true;
+        });
+      }
+      if (isTvgidsBlock) {
+        Object.keys(TVGIDS_FIELDS).forEach(function (key) {
+          customKeys[key] = true;
+        });
+      }
+      if (isFullyBlock) {
+        Object.keys(FULLY_FIELDS).forEach(function (key) {
+          customKeys[key] = true;
+        });
+      }
+      if (isWeatherinfoBlock) {
+        Object.keys(WEATHERINFO_FIELDS).forEach(function (key) {
+          customKeys[key] = true;
+        });
+      }
+      if (isGraphBlock) {
         customKeys.graph = true;
         customKeys.legend = true;
         customKeys.groupby = true;
+      }
+      if (isCalendarBlock) {
+        customKeys.icalurl = true;
       }
       var pendingTitle = isSpecial
         ? String(special.title || '')
@@ -6918,6 +11009,10 @@ var DashticzDeviceEditor = (function () {
         var rawIdx = $.trim(String($('#de-config-idx').val() || ''));
         if (_isCustomVariableIdx(rawIdx)) {
           pendingIdx = _normalizeCustomVariableIdx(rawIdx);
+        } else if (_isCustomSubdeviceIdx(rawIdx)) {
+          pendingIdx = rawIdx;
+        } else if (_isSceneIdx(rawIdx)) {
+          pendingIdx = _normalizeSceneIdx(rawIdx);
         } else {
           var parsedIdx = parseInt(rawIdx, 10);
           if (!(parsedIdx > 0 && String(parsedIdx) === rawIdx)) {
@@ -6937,6 +11032,8 @@ var DashticzDeviceEditor = (function () {
         var rawGroupIdx = $.trim(String($('#de-config-idx').val() || ''));
         if (!rawGroupIdx) {
           pendingIdx = null;
+        } else if (_isSceneIdx(rawGroupIdx)) {
+          pendingIdx = _normalizeSceneIdx(rawGroupIdx);
         } else {
           var parsedGroupIdx = parseInt(rawGroupIdx, 10);
           if (!(parsedGroupIdx > 0 && String(parsedGroupIdx) === rawGroupIdx)) {
@@ -6977,6 +11074,53 @@ var DashticzDeviceEditor = (function () {
           $('#de-config-lms-player').trigger('focus');
         }
       }
+      var pendingF1 = null;
+      if (isF1Block) {
+        pendingF1 = _readF1Fields('de-config');
+        if (!pendingF1.validUrls) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(t.invalid_f1_block_url);
+          $('#de-config-f1-urlen').trigger('focus');
+        }
+      }
+      var pendingTvgids = null;
+      if (isTvgidsBlock) {
+        pendingTvgids = _readTvgidsFields('de-config');
+        if (!pendingTvgids.channels) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(t.invalid_tvgids_block_channels);
+        }
+      }
+      var pendingFully = null;
+      if (isFullyBlock) {
+        pendingFully = _readFullyFields('de-config');
+        if (!pendingFully.host) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(t.invalid_fully_block_host);
+          $('#de-config-fully-host').trigger('focus');
+        }
+      }
+      var pendingWeatherinfo = null;
+      if (isWeatherinfoBlock) {
+        pendingWeatherinfo = _readWeatherinfoFields('de-config');
+        var weatherinfoError = _weatherinfoLocationError(pendingWeatherinfo, t);
+        if (weatherinfoError) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(weatherinfoError);
+        }
+      }
       var pendingGraph = null;
       if (isGraphBlock) {
         pendingGraph = _readGraphFields('de-config');
@@ -6989,6 +11133,29 @@ var DashticzDeviceEditor = (function () {
           $('#de-config-graph-devices').trigger('focus');
         }
       }
+      if (isClusterBlock && !clusterPendingDevices.length) {
+        valid = false;
+        $popup
+          .find('.de-config-message')
+          .addClass('text-danger')
+          .text(t.invalid_cluster_devices);
+      }
+      var pendingCalendar = null;
+      if (isCalendarBlock) {
+        pendingCalendar = _readCalendarFields(
+          'de-config',
+          $popup,
+          calendarSources,
+          t
+        );
+        if (!pendingCalendar.valid) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(_calendarFieldsErrorText(t, pendingCalendar.reason));
+        }
+      }
       // [data-option]: excludes button.js's injected Background toggle,
       // which reuses .de-config-option purely for its click-to-toggle
       // .active styling/behavior and reads its own state independently via
@@ -6998,6 +11165,46 @@ var DashticzDeviceEditor = (function () {
         var checked = $(this).hasClass('active');
         updated[option] = option === 'hide_data' ? !checked : checked;
       });
+      // An inherited Last update (see _lastUpdateOptions()) stays inherited
+      // unless its toggle was actually changed in this popup.
+      if (
+        options.last_update_inherited === true &&
+        typeof updated.last_update === 'boolean'
+      ) {
+        updated.last_update_inherited =
+          updated.last_update === options.last_update;
+      }
+      if (supportsTextStyle) {
+        updated.fontsizeTitle = _parseTextFontSize(
+          $('#de-config-fontsize-title').val(),
+          String(options.fontsizeTitle) ===
+            String(parseInt($('#de-config-fontsize-title').val(), 10))
+        );
+        updated.fontsizeValue = _parseTextFontSize(
+          $('#de-config-fontsize-value').val(),
+          String(options.fontsizeValue) ===
+            String(parseInt($('#de-config-fontsize-value').val(), 10))
+        );
+        updated.textalign = _parseTextAlign(
+          $popup.find('input[name="de-config-textalign"]:checked').val()
+        );
+        updated.textvalign = _parseTextVAlign(
+          $popup.find('input[name="de-config-textvalign"]:checked').val()
+        );
+      }
+      if (supportsCompactSelector) {
+        updated.compactSelector = $('#de-config-compact-selector').prop(
+          'checked'
+        );
+        if ($popup.find('.de-compact-icon-row').length) {
+          var pendingCompactIcons = {};
+          $popup.find('.de-compact-icon-row').each(function () {
+            var icon = _compactIconValue($(this));
+            if (icon) pendingCompactIcons[$(this).attr('data-level')] = icon;
+          });
+          updated.compactIcons = pendingCompactIcons;
+        }
+      }
       if (hasDial) {
         updated.dial = pendingVisualMode === 'dial';
         updated.bar = pendingVisualMode === 'bar';
@@ -7027,9 +11234,26 @@ var DashticzDeviceEditor = (function () {
         // barsteps this is a plain tri-state (see _specialFromReference()),
         // so "hidden" simply keeps whatever was already stored, including
         // still-undefined (auto-detect from the device's own SwitchType).
-        updated.inverse = inverseApplies(pendingVisualMode)
-          ? $('#de-config-inverse').prop('checked')
-          : options.inverse;
+        // An untouched switch leaves the tri-state alone, so the automatic
+        // detection from the device's SwitchType keeps working.
+        var inverseNow = $('#de-config-inverse').prop('checked');
+        updated.inverse =
+          inverseApplies(pendingVisualMode) && inverseNow !== inverseChecked
+            ? inverseNow
+            : options.inverse;
+        // Dial and Bar default to showing the update time, other displays
+        // follow the global setting. Changing between the two groups changes
+        // what "inherited" means, so keep the state the toggle shows.
+        var wasDialLike = options.dial === true || options.bar === true;
+        var isDialLike =
+          pendingVisualMode === 'dial' || pendingVisualMode === 'bar';
+        if (
+          wasDialLike !== isDialLike &&
+          options.last_update_inherited === true &&
+          typeof updated.last_update === 'boolean'
+        ) {
+          updated.last_update_inherited = false;
+        }
       }
 
       $popup.find('.de-custom-field-row').each(function () {
@@ -7041,7 +11265,13 @@ var DashticzDeviceEditor = (function () {
           $(this).find('.de-custom-field-setting').val() || ''
         );
         if (!rawField && !rawSetting) return;
-        var field = _normaliseCustomFieldName(rawField);
+        // A stored property keeps its spelling (Naam stays Naam) as long as
+        // the server accepts it; only new or invalid names are normalised.
+        var field =
+          originalFieldNames[rawField] &&
+          /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rawField)
+            ? rawField
+            : _normaliseCustomFieldName(rawField);
         var lowerField = field.toLowerCase();
         if (!field || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(field)) {
           valid = false;
@@ -7108,27 +11338,58 @@ var DashticzDeviceEditor = (function () {
           }
           var generatedIcon = $(this).attr('data-generated-icon') === 'true';
           var initialIcon = String($(this).attr('data-initial-setting') || '');
-          if (generatedIcon && rawSetting === initialIcon && !options.iconValue)
+          // Only skip an unchanged, still-generated suggestion when the user
+          // never actually interacted with the icon controls this time the
+          // popup was open (iconFieldTouched) - otherwise deliberately
+          // enabling Icon or typing a value that happens to match the
+          // suggested default (e.g. Cluster's 'fas fa-list-check') silently
+          // saved nothing at all, even though picking Image instead always
+          // worked.
+          if (
+            generatedIcon &&
+            rawSetting === initialIcon &&
+            !options.iconValue &&
+            !iconFieldTouched
+          )
             return;
           hasIconField = true;
           pendingIconValue = rawSetting;
           return;
         }
-        if (!rawSetting || protectedCustomDeviceProperties[lowerField]) {
+        var fieldProtected = _isProtectedCustomProperty(
+          lowerField,
+          isLmsBlock ? 'lms' : ''
+        );
+        if (!rawSetting || fieldProtected) {
           valid = false;
           $popup
             .find('.de-config-message')
             .addClass('text-danger')
-            .text(
-              protectedCustomDeviceProperties[lowerField]
-                ? t.duplicate_field
-                : t.invalid_field
-            );
+            .text(fieldProtected ? t.duplicate_field : t.invalid_field);
           $(this).find('.de-custom-field-name').trigger('focus');
           return;
         }
         var parsedSetting = _parseCustomSetting(rawSetting);
         if (!parsedSetting.valid) {
+          valid = false;
+          $popup
+            .find('.de-config-message')
+            .addClass('text-danger')
+            .text(t.invalid_setting);
+          $(this).find('.de-custom-field-setting').trigger('focus');
+          return;
+        }
+        // The target screen of a slide button: a whole number from 1.
+        if (
+          special &&
+          special.specialType === 'slidebutton' &&
+          lowerField === 'slide' &&
+          !(
+            typeof parsedSetting.value === 'number' &&
+            parsedSetting.value >= 1 &&
+            Math.floor(parsedSetting.value) === parsedSetting.value
+          )
+        ) {
           valid = false;
           $popup
             .find('.de-config-message')
@@ -7166,10 +11427,26 @@ var DashticzDeviceEditor = (function () {
             $(this).find('.md-value-value').trigger('focus');
             return;
           }
-          var rowEntry = { value: rawValue };
+          var originalRow = {};
+          try {
+            originalRow = JSON.parse($(this).attr('data-md-original') || '{}');
+          } catch (ignore) {
+            originalRow = {};
+          }
+          if (!originalRow || typeof originalRow !== 'object') originalRow = {};
+          var rowEntry = $.extend({}, originalRow);
+          // An untouched value keeps its type (0, false, a number).
+          rowEntry.value =
+            typeof originalRow.value !== 'undefined' &&
+            String(originalRow.value) === rawValue
+              ? originalRow.value
+              : rawValue;
+          delete rowEntry.idx;
           if (rawRowIdx) {
-            var rowIdx = parseInt(rawRowIdx, 10);
-            if (!(rowIdx > 0 && String(rowIdx) === rawRowIdx)) {
+            // The forms the Custom device accepts: 12, v3, s3 and 12_1.
+            if (
+              !/^(?:v\d+|s[1-9]\d*|[1-9]\d*_[1-9]\d*|[1-9]\d*)$/.test(rawRowIdx)
+            ) {
               valid = false;
               $popup
                 .find('.de-config-message')
@@ -7178,7 +11455,9 @@ var DashticzDeviceEditor = (function () {
               $(this).find('.md-value-idx').trigger('focus');
               return;
             }
-            rowEntry.idx = rowIdx;
+            rowEntry.idx = /^\d+$/.test(rawRowIdx)
+              ? parseInt(rawRowIdx, 10)
+              : rawRowIdx;
           }
           pendingValues.push(rowEntry);
         });
@@ -7213,24 +11492,156 @@ var DashticzDeviceEditor = (function () {
         });
       }
       storedRows = storedRows.concat(pendingCustomFields);
+      if (pendingF1) storedRows = storedRows.concat(_f1CustomRows(pendingF1));
+      if (pendingTvgids)
+        storedRows = storedRows.concat(_tvgidsCustomRows(pendingTvgids));
+      if (pendingFully)
+        storedRows = storedRows.concat(_fullyCustomRows(pendingFully));
+      if (pendingWeatherinfo)
+        storedRows = storedRows.concat(
+          _weatherinfoCustomRows(pendingWeatherinfo)
+        );
       if (pendingGraph) {
         storedRows.push({
           field: 'devices',
           setting: JSON.stringify(pendingGraph.devices),
           value: pendingGraph.devices,
         });
-        if (pendingGraph.graphType === 'bar') {
+        var keepOriginal = function (field, key, pendingValue, initialValue) {
+          if (
+            typeof graphOriginal[key] === 'undefined' ||
+            pendingValue !== initialValue
+          )
+            return false;
+          storedRows.push({
+            field: field,
+            setting: _settingToText(graphOriginal[key]),
+            value: graphOriginal[key],
+          });
+          return true;
+        };
+        if (
+          !keepOriginal(
+            'graph',
+            'graph',
+            pendingGraph.graphType,
+            graphInitial.graphType
+          ) &&
+          pendingGraph.graphType === 'bar'
+        ) {
           storedRows.push({ field: 'graph', setting: 'bar', value: 'bar' });
         }
-        if (pendingGraph.legend) {
+        if (
+          !keepOriginal(
+            'legend',
+            'legend',
+            pendingGraph.legend,
+            graphInitial.legend
+          ) &&
+          pendingGraph.legend
+        ) {
           storedRows.push({ field: 'legend', setting: 'true', value: true });
         }
-        if (pendingGraph.groupBy) {
+        if (
+          keepOriginal(
+            'groupBy',
+            'groupby',
+            pendingGraph.groupBy,
+            graphInitial.groupBy
+          )
+        ) {
+          // unchanged: the original groupBy is written above
+        } else if (pendingGraph.groupBy) {
           storedRows.push({
             field: 'groupBy',
             setting: pendingGraph.groupBy,
             value: pendingGraph.groupBy,
           });
+        }
+      }
+      if (pendingCalendar) {
+        storedRows.push({
+          field: 'icalurl',
+          setting:
+            typeof pendingCalendar.icalurl === 'string'
+              ? pendingCalendar.icalurl
+              : JSON.stringify(pendingCalendar.icalurl),
+          value: pendingCalendar.icalurl,
+        });
+      }
+      if (isClusterBlock) {
+        var clusterDeviceIdxOut = clusterPendingDevices.map(function (d) {
+          return d.idx;
+        });
+        storedRows.push({
+          field: 'devices',
+          setting: JSON.stringify(clusterDeviceIdxOut),
+          value: clusterDeviceIdxOut,
+        });
+        var clusterTitlesOut = {};
+        clusterPendingDevices.forEach(function (d) {
+          if (d.title) clusterTitlesOut[d.idx] = d.title;
+        });
+        if (Object.keys(clusterTitlesOut).length) {
+          storedRows.push({
+            field: 'titles',
+            setting: JSON.stringify(clusterTitlesOut),
+            value: clusterTitlesOut,
+          });
+        }
+        var clusterIconsOut = {};
+        clusterPendingDevices.forEach(function (d) {
+          if (d.icon) clusterIconsOut[d.idx] = d.icon;
+        });
+        if (Object.keys(clusterIconsOut).length) {
+          storedRows.push({
+            field: 'icons',
+            setting: JSON.stringify(clusterIconsOut),
+            value: clusterIconsOut,
+          });
+        }
+        var editFontSize = _readClusterFontSize(
+          $('#de-config-font-size').val()
+        );
+        if (editFontSize !== null) {
+          storedRows.push({
+            field: 'fontSize',
+            setting: String(editFontSize),
+            value: editFontSize,
+          });
+        }
+        if (_clusterUsesSwitchRows(clusterMode)) {
+          var editSwitchScale = _readClusterSwitchScale(
+            $('#de-config-switch-scale').val()
+          );
+          if (editSwitchScale !== null) {
+            storedRows.push({
+              field: 'switchScale',
+              setting: String(editSwitchScale),
+              value: editSwitchScale,
+            });
+          }
+        }
+        if (clusterMode === 'temperature') {
+          storedRows.push({
+            field: 'mode',
+            setting: 'temperature',
+            value: 'temperature',
+          });
+        } else if (clusterMode === 'other') {
+          storedRows.push({ field: 'mode', setting: 'other', value: 'other' });
+        } else {
+          var clusterUsageOut = {};
+          clusterPendingDevices.forEach(function (d) {
+            if (d.usageIdx) clusterUsageOut[d.idx] = d.usageIdx;
+          });
+          if (Object.keys(clusterUsageOut).length) {
+            storedRows.push({
+              field: 'usage',
+              setting: JSON.stringify(clusterUsageOut),
+              value: clusterUsageOut,
+            });
+          }
         }
       }
       if (pendingValues) {
@@ -7241,6 +11652,23 @@ var DashticzDeviceEditor = (function () {
         });
       }
 
+      // Layout Editor route: the change is only kept when the server accepts
+      // it, so remember what to put back.
+      var rollbackConfig = null;
+      if (persistOnly) {
+        rollbackConfig = isSpecial
+          ? { special: $.extend(true, {}, special) }
+          : {
+              title: deviceTitles[ck],
+              customFields: $.extend(true, [], deviceCustomFields[ck] || []),
+              titleVisible: deviceTitleVisible[ck],
+              options: $.extend(true, {}, deviceOptions[ck] || {}),
+              hadOptions: Object.prototype.hasOwnProperty.call(
+                deviceOptions,
+                ck
+              ),
+            };
+      }
       if (isSpecial) {
         special.title = pendingTitle;
         special.customFields = storedRows;
@@ -7300,11 +11728,27 @@ var DashticzDeviceEditor = (function () {
           .text(t.saving);
         _saveDeviceConfigOnly()
           .done(function () {
-            window.bootstrap.Modal.getInstance(
-              document.getElementById('de-config-popup')
-            ).hide();
+            _hideModal(document.getElementById('de-config-popup'));
           })
           .fail(function (xhr) {
+            if (rollbackConfig) {
+              if (rollbackConfig.special) {
+                // In place: the popup keeps working on the same object.
+                Object.keys(special).forEach(function (key) {
+                  delete special[key];
+                });
+                $.extend(special, rollbackConfig.special);
+              } else {
+                deviceTitles[ck] = rollbackConfig.title;
+                deviceCustomFields[ck] = rollbackConfig.customFields;
+                deviceTitleVisible[ck] = rollbackConfig.titleVisible;
+                if (rollbackConfig.hadOptions) {
+                  deviceOptions[ck] = rollbackConfig.options;
+                } else {
+                  delete deviceOptions[ck];
+                }
+              }
+            }
             var msg =
               xhr.responseJSON && xhr.responseJSON.error
                 ? xhr.responseJSON.error
@@ -7317,9 +11761,7 @@ var DashticzDeviceEditor = (function () {
           });
         return;
       }
-      window.bootstrap.Modal.getInstance(
-        document.getElementById('de-config-popup')
-      ).hide();
+      _hideModal(document.getElementById('de-config-popup'));
     });
 
     var popup = document.getElementById('de-config-popup');
@@ -7488,6 +11930,7 @@ var DashticzDeviceEditor = (function () {
     var isCustom = special.specialType === 'custom';
     var isSlideButton = special.specialType === 'slidebutton';
     var isGroupBlock = special.specialType === 'group';
+    var isClusterBlock = special.specialType === 'cluster';
     var isHtmlBlock = special.specialType === 'html';
     var isIframeBlock = special.specialType === 'iframe';
     var isCalendarBlock = special.specialType === 'calendar';
@@ -7514,6 +11957,7 @@ var DashticzDeviceEditor = (function () {
             ? t.slide_button
             : t.dummy_device;
     if (isGroupBlock) label = t.group_block;
+    else if (isClusterBlock) label = t.cluster_block;
     else if (isHtmlBlock) label = t.html_block;
     else if (isIframeBlock) label = t.iframe_block;
     else if (isCalendarBlock) label = t.calendar_block;
@@ -7521,6 +11965,10 @@ var DashticzDeviceEditor = (function () {
     else if (isTimegraphBlock) label = t.timegraph_block;
     else if (isXmltvguideBlock) label = t.xmltvguide_block;
     else if (isLmsBlock) label = t.lms_block;
+    else if (special.specialType === 'f1') label = t.f1_block;
+    else if (special.specialType === 'tvgids') label = t.tvgids_block;
+    else if (special.specialType === 'fullykiosk') label = t.fully_block;
+    else if (special.specialType === 'weatherinfo') label = t.weatherinfo_block;
     var htmlFileRow =
       isHtmlBlock && special.customFields
         ? special.customFields.find(function (row) {
@@ -7570,26 +12018,28 @@ var DashticzDeviceEditor = (function () {
           ? special.idx
             ? 'IDX\u00a0' + special.idx
             : special.reference
-          : isHtmlBlock
-            ? (htmlFileRow && htmlFileRow.setting) || special.reference
-            : isIframeBlock
-              ? (frameurlRow && frameurlRow.setting) || special.reference
-              : isCalendarBlock
-                ? (icalurlRow && icalurlRow.setting) || special.reference
-                : isPublicTransportBlock
-                  ? (stationRow && stationRow.setting) || special.reference
-                  : isTimegraphBlock
-                    ? 'IDX ' + special.idx
-                    : isXmltvguideBlock
-                      ? (xmltvurlRow && xmltvurlRow.setting) ||
-                        special.reference
-                      : isLmsBlock
-                        ? special.lmsPlayerLabel ||
-                          special.lmsPlayer ||
+          : isClusterBlock
+            ? special.reference
+            : isHtmlBlock
+              ? (htmlFileRow && htmlFileRow.setting) || special.reference
+              : isIframeBlock
+                ? (frameurlRow && frameurlRow.setting) || special.reference
+                : isCalendarBlock
+                  ? _calendarBlockDetailText(icalurlRow, special.reference, t)
+                  : isPublicTransportBlock
+                    ? (stationRow && stationRow.setting) || special.reference
+                    : isTimegraphBlock
+                      ? 'IDX ' + special.idx
+                      : isXmltvguideBlock
+                        ? (xmltvurlRow && xmltvurlRow.setting) ||
                           special.reference
-                        : isCustom
-                          ? special.reference + ' · IDX\u00a0' + special.idx
-                          : 'IDX\u00a0' + special.idx;
+                        : isLmsBlock
+                          ? special.lmsPlayerLabel ||
+                            special.lmsPlayer ||
+                            special.reference
+                          : isCustom
+                            ? special.reference + ' · IDX\u00a0' + special.idx
+                            : 'IDX\u00a0' + special.idx;
     var specialIconClass = isTitle
       ? 'fa-divide'
       : isSlideButton
@@ -7598,6 +12048,7 @@ var DashticzDeviceEditor = (function () {
           ? 'fa-layer-group'
           : 'fa-cube';
     if (isGroupBlock) specialIconClass = 'fa-object-group';
+    else if (isClusterBlock) specialIconClass = 'fa-list-check';
     else if (isHtmlBlock) specialIconClass = 'fa-code';
     else if (isIframeBlock) specialIconClass = 'fa-window-maximize';
     else if (isCalendarBlock) specialIconClass = 'fa-calendar-alt';
@@ -7605,6 +12056,13 @@ var DashticzDeviceEditor = (function () {
     else if (isTimegraphBlock) specialIconClass = 'fa-chart-line';
     else if (isXmltvguideBlock) specialIconClass = 'fa-tv';
     else if (isLmsBlock) specialIconClass = 'fa-music';
+    else if (special.specialType === 'f1')
+      specialIconClass = 'fa-flag-checkered';
+    else if (special.specialType === 'tvgids') specialIconClass = 'fa-tv';
+    else if (special.specialType === 'fullykiosk')
+      specialIconClass = 'fa-tablet-screen-button';
+    else if (special.specialType === 'weatherinfo')
+      specialIconClass = 'fa-cloud-sun-rain';
     var html =
       '<div class="de-device-item de-special-item" data-special-key="' +
       _esc(special.reference) +
@@ -7757,6 +12215,10 @@ var DashticzDeviceEditor = (function () {
     xmltvguide: 'xmltvguide_',
     camera: 'camera_',
     news: 'news_',
+    f1: 'f1_',
+    tvgids: 'tvgids_',
+    fullykiosk: 'fullykiosk_',
+    weatherinfo: 'weatherinfo_',
     // Matches the legacy hand-written 'graph_<idx>' convention (see
     // docs/blocks/graphs.rst and js/components/graph.js's own canHandle()
     // key-prefix check), so a repeatable instance's auto-generated key
@@ -8139,6 +12601,7 @@ var DashticzDeviceEditor = (function () {
     });
 
     $list.on('dragend', '.de-device-item', function () {
+      dragSrcEl = null;
       $(this).removeClass('de-drag-dragging');
       $list
         .find('.de-drag-over-top, .de-drag-over-bottom')
@@ -8165,7 +12628,18 @@ var DashticzDeviceEditor = (function () {
 
     $list.on('drop', '.de-device-item', function (e) {
       e.preventDefault();
-      if (!dragSrcEl || this === dragSrcEl) return;
+      // Only a row dragged from this list moves: text, links or files
+      // dropped from elsewhere carry other data.
+      var dropped = e.originalEvent.dataTransfer
+        ? e.originalEvent.dataTransfer.getData('text/plain')
+        : '';
+      if (
+        !dragSrcEl ||
+        this === dragSrcEl ||
+        dropped !== String($(dragSrcEl).attr('data-order-key'))
+      ) {
+        return;
+      }
       var rect = this.getBoundingClientRect();
       var above = e.originalEvent.clientY < rect.top + rect.height / 2;
       if (above) {
@@ -8216,7 +12690,7 @@ var DashticzDeviceEditor = (function () {
      saveblocks.php replaces the whole device section for the screen, so
      both callers must submit every currently managed device, not just the
      one that changed. */
-  function _buildDevicePayload() {
+  function _buildDevicePayload(keepRefs) {
     var orderedBlockKeys = managedOrder.filter(function (orderKey) {
       return orderKey.indexOf('widget:') !== 0;
     });
@@ -8253,7 +12727,10 @@ var DashticzDeviceEditor = (function () {
             specialEntry.icon = specialOptions.iconValue;
           }
           specialEntry.hide_data = specialOptions.hide_data === true;
-          specialEntry.last_update = specialOptions.last_update === true;
+          // Left out while inherited, see _lastUpdateOptions().
+          if (specialOptions.last_update_inherited !== true) {
+            specialEntry.last_update = specialOptions.last_update === true;
+          }
           specialEntry.switch = specialOptions.switch === true;
           if (specialOptions.bar === true) {
             // saveblocks.php intentionally accepts only type:'dial'; keep its
@@ -8285,6 +12762,22 @@ var DashticzDeviceEditor = (function () {
             }
             specialEntry.custom_fields = specialCustomFields;
           }
+          // Selector Switch Compact layout, same as for a plain device below.
+          delete specialCustomFields.compactSelector;
+          delete specialCustomFields.compactIcons;
+          if (specialOptions.compactSelector === true) {
+            specialCustomFields.compactSelector = true;
+            if (
+              specialOptions.compactIcons &&
+              Object.keys(specialOptions.compactIcons).length
+            )
+              specialCustomFields.compactIcons = specialOptions.compactIcons;
+          }
+          _applyTextStyleFields(specialCustomFields, specialOptions);
+          _applyReverseIconField(specialCustomFields, specialOptions);
+          if (Object.keys(specialCustomFields).length)
+            specialEntry.custom_fields = specialCustomFields;
+          else delete specialEntry.custom_fields;
         } else if (
           SIMPLE_ICON_PAYLOAD_KINDS.indexOf(special.specialType) > -1
         ) {
@@ -8302,7 +12795,9 @@ var DashticzDeviceEditor = (function () {
           } else if (quickSaveOptions.iconValue) {
             specialEntry.icon = quickSaveOptions.iconValue;
           }
-          specialEntry.last_update = quickSaveOptions.last_update === true;
+          if (quickSaveOptions.last_update_inherited !== true) {
+            specialEntry.last_update = quickSaveOptions.last_update === true;
+          }
           if (special.specialType === 'group' && special.idx) {
             specialEntry.idx = special.idx;
           }
@@ -8319,7 +12814,9 @@ var DashticzDeviceEditor = (function () {
           } else if (tgOptions.iconValue) {
             specialEntry.icon = tgOptions.iconValue;
           }
-          specialEntry.last_update = tgOptions.last_update === true;
+          if (tgOptions.last_update_inherited !== true) {
+            specialEntry.last_update = tgOptions.last_update === true;
+          }
           specialEntry.idx = special.idx;
         } else if (special.specialType === 'slidebutton') {
           var slideOptions = special.options || {};
@@ -8331,6 +12828,15 @@ var DashticzDeviceEditor = (function () {
               special.reference
           ).slice(0, 100);
           specialEntry.icon = slideOptions.iconValue || '';
+          // slide and button_key are sent above, validated; saveblocks.php
+          // refuses them as custom fields.
+          if (specialEntry.custom_fields) {
+            delete specialEntry.custom_fields.slide;
+            delete specialEntry.custom_fields.button_key;
+            if (!Object.keys(specialEntry.custom_fields).length) {
+              delete specialEntry.custom_fields;
+            }
+          }
         } else if (special.specialType === 'title') {
           var titleOptions = special.options || {};
           if (titleOptions.icon === false) {
@@ -8383,6 +12889,7 @@ var DashticzDeviceEditor = (function () {
         width: _parseWidth(deviceWidths[ck]),
         key: _stableDeviceReference(ck),
       };
+      if (keepRefs) entry.key = _existingDeviceReference(ck);
       var title = String(deviceTitles[ck] || '').trim();
       var options = deviceOptions[ck] || {};
       if (title) entry.title = title;
@@ -8393,7 +12900,10 @@ var DashticzDeviceEditor = (function () {
         entry.icon = options.iconValue;
       }
       entry.hide_data = options.hide_data === true;
-      entry.last_update = options.last_update === true;
+      // Left out while inherited, see _lastUpdateOptions().
+      if (options.last_update_inherited !== true) {
+        entry.last_update = options.last_update === true;
+      }
       entry.switch = options.switch === true;
       if (options.bar === true || options.dial === true) {
         // Dial and Bar both need the full Domoticz device. A sub-value idx
@@ -8438,6 +12948,18 @@ var DashticzDeviceEditor = (function () {
           customFields.inverse = options.inverse;
         }
       }
+      // Selector Switch Compact layout: rides through custom_fields like
+      // needle above (saveblocks.php only knows a fixed set of top-level
+      // props). Written only when on; unchecking removes it.
+      delete customFields.compactSelector;
+      delete customFields.compactIcons;
+      if (options.compactSelector === true) {
+        customFields.compactSelector = true;
+        if (options.compactIcons && Object.keys(options.compactIcons).length)
+          customFields.compactIcons = options.compactIcons;
+      }
+      _applyTextStyleFields(customFields, options);
+      _applyReverseIconField(customFields, options);
       if (Object.keys(customFields).length) entry.custom_fields = customFields;
       if (deviceHeights[ck]) entry.height = deviceHeights[ck];
       // Never retain a legacy name-based reference: Domoticz names may change.
@@ -8457,7 +12979,9 @@ var DashticzDeviceEditor = (function () {
         return _postEditorData(
           'js/saveblocks.php',
           {
-            devices: _buildDevicePayload(),
+            // keepRefs: the Layout Editor keeps pointing at the key a block
+            // already has, so the change must be written under that key.
+            devices: _buildDevicePayload(true),
             screen: _activeScreenPayload(),
             blocksOnly: true,
           },
@@ -8496,6 +13020,14 @@ var DashticzDeviceEditor = (function () {
         return orderKey === layoutEditorBaseline[index];
       });
     if (!existingUntouched) return false;
+    // An edit of an existing item (width, title, Device Config...) does not
+    // change the order, but must not be lost: use the normal save.
+    if (
+      layoutEditorBaselineState === null ||
+      _graftSignature(layoutEditorBaseline) !== layoutEditorBaselineState
+    ) {
+      return false;
+    }
 
     var newOrderKeys = managedOrder.filter(function (orderKey) {
       return layoutEditorBaseline.indexOf(orderKey) === -1;
@@ -8507,6 +13039,16 @@ var DashticzDeviceEditor = (function () {
       if (orderKey.indexOf('device:') === 0) {
         var ck = orderKey.slice(7);
         var p = _parseCk(ck);
+        // A title, option or custom field typed for the new device would be
+        // dropped by the Layout Editor, so that goes through the normal save.
+        if (
+          String(deviceTitles[ck] || '').trim() ||
+          (deviceCustomFields[ck] || []).some(function (row) {
+            return !row.system;
+          })
+        ) {
+          return false;
+        }
         entries.push({
           kind: 'device',
           idx: p.idx,
@@ -8551,10 +13093,31 @@ var DashticzDeviceEditor = (function () {
   }
 
   function _closeModalWithoutSaving() {
-    var el = document.getElementById('deviceeditorpopup');
-    var instance =
-      el && window.bootstrap && window.bootstrap.Modal.getInstance(el);
-    if (instance) instance.hide();
+    _hideModal(document.getElementById('deviceeditorpopup'));
+  }
+
+  /* Close a popup after one of its own actions (OK, Save, Back, ...).
+     Bootstrap's Modal.hide() is silently ignored while a modal is still
+     opening (its fade-in), so an action handled right after a popup opened
+     did its work but left the popup open, and anything waiting for its
+     'hidden.bs.modal' (the parent editor, a child popup) never ran. Such a
+     modal is now hidden as soon as it has finished opening; at any other
+     moment this is exactly Modal.hide(). Bootstrap's own close paths
+     (Cancel/X, Escape, backdrop) are left unchanged. Kept per file, like
+     widgeteditor.js's copy, so no editor depends on another cached script. */
+  function _hideModal(element) {
+    var modal =
+      element &&
+      window.bootstrap &&
+      window.bootstrap.Modal.getInstance(element);
+    if (!modal) return;
+    if (modal._isShown === true && modal._isTransitioning === true) {
+      $(element).one('shown.bs.modal', function () {
+        modal.hide();
+      });
+      return;
+    }
+    modal.hide();
   }
 
   // Devices in openDeviceEntries no longer in managedOrder were toggled off
@@ -8599,8 +13162,14 @@ var DashticzDeviceEditor = (function () {
     return sources;
   }
 
+  var saveInFlight = false;
+
   function _save() {
     if (layoutEditorBaseline && _graftIntoLayoutEditor()) return;
+    // One save chain at a time: a double click must not start a second one.
+    if (saveInFlight) return;
+    // Set once saveblocks.php has written; a later step can still fail.
+    var blocksWritten = false;
 
     var t = _translations();
     var $btn = $('#de-save-btn').prop('disabled', true).text(t.saving);
@@ -8627,6 +13196,7 @@ var DashticzDeviceEditor = (function () {
 
     var deviceRuleSourcesToDelete = _removedDeviceRuleSources();
 
+    saveInFlight = true;
     $.getJSON(settings['dashticz_php_path'] + 'info.php?get=csrf')
       .then(function (data) {
         var token = data.token;
@@ -8639,6 +13209,7 @@ var DashticzDeviceEditor = (function () {
           },
           token
         ).then(function (deviceResult) {
+          blocksWritten = true;
           // Widget display options must also be persisted on grid screens.
           // Passing the stable grid key lets savewidgets.php rebuild only the
           // editor-owned widget blocks before savegridlayout.php rewrites order.
@@ -8771,6 +13342,8 @@ var DashticzDeviceEditor = (function () {
             });
             if (_activeScreenTarget() === 'standby') {
               layoutItems = _preserveStandbyExtraBlocks(layoutItems);
+            } else {
+              layoutItems = layoutItems.concat(columnExtras);
             }
             return _postEditorData(
               'js/savelayout.php',
@@ -8798,10 +13371,7 @@ var DashticzDeviceEditor = (function () {
       .done(function () {
         $btn.removeClass('btn-primary').addClass('btn-success').text(t.saved);
         setTimeout(function () {
-          var el = document.getElementById('deviceeditorpopup');
-          if (el && window.bootstrap) {
-            window.bootstrap.Modal.getInstance(el).hide();
-          }
+          _hideModal(document.getElementById('deviceeditorpopup'));
           // eslint-disable-next-line no-self-assign
           window.location.href = window.location.href;
         }, 900);
@@ -8811,8 +13381,18 @@ var DashticzDeviceEditor = (function () {
           xhr.responseJSON && xhr.responseJSON.error
             ? xhr.responseJSON.error
             : t.save_failed;
+        saveInFlight = false;
         $btn.prop('disabled', false).text(t.save);
-        alert(t.error_prefix + ' ' + msg);
+        alert(
+          t.error_prefix +
+            ' ' +
+            msg +
+            (blocksWritten
+              ? '\n\n' +
+                (t.partial_save_hint ||
+                  'The blocks were saved, but the layout was not. Press Save again before you leave this screen.')
+              : '')
+        );
       });
   }
 
@@ -8822,21 +13402,32 @@ var DashticzDeviceEditor = (function () {
       if (item && item.ref) known[item.ref] = true;
     });
     var preserved = [];
-    if (
-      typeof columns_standby !== 'undefined' &&
-      columns_standby &&
-      columns_standby[1] &&
-      Array.isArray(columns_standby[1].blocks)
-    ) {
-      columns_standby[1].blocks.forEach(function (ref) {
-        if (typeof ref !== 'string' || known[ref]) return;
-        // Keep simple/hand-written standby blocks (clock, weather, …).
-        if (_toCompositeKey(ref) || _widgetFromReference(ref)) return;
-        preserved.push({ ref: ref, width: 12 });
-        known[ref] = true;
+    if (typeof columns_standby !== 'undefined' && columns_standby) {
+      Object.keys(columns_standby).forEach(function (colKey) {
+        var col = columns_standby[colKey];
+        if (!col || !Array.isArray(col.blocks)) return;
+        col.blocks.forEach(function (ref) {
+          if (typeof ref !== 'string' || known[ref]) return;
+          // Keep simple/hand-written standby blocks (clock, weather, ...).
+          // A reference that points at a device, special or widget block is
+          // managed by the editor and comes back through layoutItems under
+          // its own key, so it is not preserved a second time.
+          var definition =
+            typeof blocks !== 'undefined' && blocks[ref] ? blocks[ref] : null;
+          if (
+            _specialFromReference(ref) ||
+            _toCompositeKey(ref) ||
+            (definition && _toCompositeKey(definition)) ||
+            _widgetFromReference(ref)
+          ) {
+            return;
+          }
+          preserved.push({ ref: ref, width: 12 });
+          known[ref] = true;
+        });
       });
     }
-    return preserved.concat(layoutItems);
+    return layoutItems.concat(preserved);
   }
 
   function _postEditorData(url, payload, token) {
@@ -8851,6 +13442,148 @@ var DashticzDeviceEditor = (function () {
   }
 
   /* ── HTML-escape helper ─────────────────────────────────────── */
+  // Icons offered per level for a compact Selector Switch (Font Awesome
+  // classes, all in the free set). '' = automatic, '__custom__' = own class.
+  var COMPACT_ICON_PRESETS = [
+    ['fas fa-chevron-up', 'Chevron up'],
+    ['fas fa-chevron-down', 'Chevron down'],
+    ['fas fa-minus', 'Minus'],
+    ['fas fa-arrow-up', 'Arrow up'],
+    ['fas fa-arrow-down', 'Arrow down'],
+    ['fas fa-power-off', 'Power'],
+    ['fas fa-toggle-on', 'Toggle on'],
+    ['fas fa-toggle-off', 'Toggle off'],
+    ['fas fa-lightbulb', 'Light on'],
+    ['far fa-lightbulb', 'Light off'],
+    ['fas fa-check', 'Check'],
+    ['fas fa-xmark', 'Cross'],
+    ['fas fa-sun', 'Sun'],
+    ['fas fa-moon', 'Moon'],
+    ['fas fa-lock', 'Locked'],
+    ['fas fa-lock-open', 'Unlocked'],
+    ['fas fa-play', 'Play'],
+    ['fas fa-pause', 'Pause'],
+    ['fas fa-stop', 'Stop'],
+  ];
+
+  // The levels a Selector Switch shows as buttons, same rules as
+  // js/blocks.js getSelectorSwitch(): [{value: level index, name}].
+  function _selectorLevels(device) {
+    if (!device || typeof device.LevelNames !== 'string' || !device.LevelNames)
+      return [];
+    var names = device.LevelNames;
+    if (
+      typeof Domoticz !== 'undefined' &&
+      Domoticz.info &&
+      Domoticz.info.levelNamesEncoded &&
+      typeof b64_to_utf8 === 'function'
+    )
+      names = b64_to_utf8(names);
+    return names
+      .split('|')
+      .map(function (name, index) {
+        return { value: index, name: name };
+      })
+      .filter(function (level) {
+        return (
+          level.value > 0 ||
+          typeof device.LevelOffHidden === 'undefined' ||
+          device.LevelOffHidden === false
+        );
+      });
+  }
+
+  // Toggle button content: the chosen icon (or "Automatic") plus a caret.
+  function _compactIconLabel(icon, t) {
+    return (
+      (icon
+        ? '<i class="' + _esc(icon) + '" aria-hidden="true"></i>'
+        : _esc(t.compact_icon_auto)) +
+      ' <span aria-hidden="true">&#9662;</span>'
+    );
+  }
+
+  // One row per level: the level name and a pull-down whose entries are the
+  // icons themselves (names only as tooltip).
+  function _compactIconRowsHtml(levels, saved, t) {
+    var html = '';
+    levels.forEach(function (level) {
+      var current = String((saved && saved[level.value]) || '');
+      var preset = COMPACT_ICON_PRESETS.some(function (p) {
+        return p[0] === current;
+      });
+      var selected = !current ? '' : preset ? current : '__custom__';
+      html +=
+        '<div class="mb-2 de-compact-icon-row" data-level="' +
+        level.value +
+        '"><div class="d-flex align-items-center gap-2" style="position:relative;">' +
+        '<span class="flex-grow-1">' +
+        _esc(level.name) +
+        '</span><button type="button" class="btn btn-outline-secondary btn-sm de-compact-icon-toggle" aria-haspopup="true" style="min-width:4em;">' +
+        _compactIconLabel(current, t) +
+        '</button>' +
+        '<div class="de-compact-icon-panel d-none" style="position:absolute;top:100%;right:0;z-index:1060;min-width:4em;width:max-content;max-height:260px;overflow-x:hidden;overflow-y:auto;padding:4px;margin-top:2px;border:1px solid rgba(128,128,128,.5);border-radius:6px;background:var(--bs-body-bg,#fff);box-shadow:0 4px 12px rgba(0,0,0,.35);">' +
+        '<button type="button" class="btn btn-sm d-block w-100 text-center de-compact-icon-choice' +
+        (selected === '' ? ' active' : '') +
+        '" data-icon="">' +
+        _esc(t.compact_icon_auto) +
+        '</button>';
+      COMPACT_ICON_PRESETS.forEach(function (p) {
+        html +=
+          '<button type="button" class="btn btn-sm d-block w-100 text-center de-compact-icon-choice' +
+          (selected === p[0] ? ' active' : '') +
+          '" data-icon="' +
+          _esc(p[0]) +
+          '" title="' +
+          _esc(p[1]) +
+          '" aria-label="' +
+          _esc(p[1]) +
+          '"><i class="' +
+          _esc(p[0]) +
+          '" aria-hidden="true"></i></button>';
+      });
+      html +=
+        '<button type="button" class="btn btn-sm d-block w-100 text-center de-compact-icon-choice' +
+        (selected === '__custom__' ? ' active' : '') +
+        '" data-icon="__custom__" title="' +
+        _esc(t.compact_icon_custom) +
+        '" aria-label="' +
+        _esc(t.compact_icon_custom) +
+        '">&hellip;</button></div></div>' +
+        '<input type="text" class="form-control form-control-sm mt-1 de-compact-icon-custom' +
+        (selected === '__custom__' ? '' : ' d-none') +
+        '" placeholder="fas fa-star" aria-label="' +
+        _esc(t.compact_icon_custom) +
+        '" value="' +
+        (selected === '__custom__' ? _esc(current) : '') +
+        '"><input type="hidden" class="de-compact-icon-value" value="' +
+        _esc(selected) +
+        '"></div>';
+    });
+    return html;
+  }
+
+  // Value chosen in one level row: a safe Font Awesome class string or ''.
+  function _compactIconValue($row) {
+    var value = String($row.find('.de-compact-icon-value').val() || '');
+    if (value === '__custom__')
+      value = String($row.find('.de-compact-icon-custom').val() || '').trim();
+    return /^[A-Za-z0-9 _-]+$/.test(value) ? value : '';
+  }
+
+  // Sync the toggle button and the custom input of one level row.
+  function _refreshCompactIconRow($row, t) {
+    $row
+      .find('.de-compact-icon-toggle')
+      .html(_compactIconLabel(_compactIconValue($row), t));
+    $row
+      .find('.de-compact-icon-custom')
+      .toggleClass(
+        'd-none',
+        String($row.find('.de-compact-icon-value').val()) !== '__custom__'
+      );
+  }
+
   function _esc(str) {
     return String(str)
       .replace(/&/g, '&amp;')
@@ -8881,79 +13614,102 @@ var DashticzDeviceEditor = (function () {
     ) {
       return blocks[reference];
     }
+    // A bare reference has no block of its own. Take the block of this
+    // screen, never a Custom block or a block of another screen that merely
+    // shares the idx.
+    var screenBlock = _getConfiguredScreenBlockForCk(ck);
+    if (screenBlock) return screenBlock;
     var keys = Object.keys(blocks);
     for (var i = 0; i < keys.length; i++) {
-      if (_toCompositeKey(blocks[keys[i]]) === ck) return blocks[keys[i]];
+      if (
+        _toCompositeKey(blocks[keys[i]]) === ck &&
+        !_specialFromReference(keys[i]) &&
+        !/^(?:screen\d+_)/.test(keys[i])
+      ) {
+        return blocks[keys[i]];
+      }
+    }
+    return null;
+  }
+
+  // The column objects of the screen that is being edited (standby included).
+  function _activeColumnObjects() {
+    var result = [];
+    if (typeof columns === 'undefined') return result;
+    var standby = _activeScreenTarget() === 'standby';
+    var seenKeys = {};
+    function add(rawKey) {
+      var key = String(rawKey);
+      if (key === 'bar') return;
+      if (standby) key = key.replace(/^standby/, '');
+      if (seenKeys[key]) return;
+      seenKeys[key] = true;
+      var col =
+        standby &&
+        typeof columns_standby !== 'undefined' &&
+        columns_standby[key]
+          ? columns_standby[key]
+          : columns[standby ? 'standby' + key : key];
+      if (col && Array.isArray(col.blocks)) result.push(col);
+    }
+    _activeScreenDom()
+      .find('[data-colindex]')
+      .each(function () {
+        add($(this).attr('data-colindex'));
+      });
+    if (standby && typeof columns_standby !== 'undefined' && columns_standby) {
+      Object.keys(columns_standby).forEach(add);
+    }
+    return result;
+  }
+
+  // The configured block of a managed device on the active screen: the exact
+  // reference first, then the columns of this screen only (the same device
+  // may sit on other screens with another width or height).
+  function _getConfiguredScreenBlockForCk(ck) {
+    var reference = deviceRefs[ck];
+    if (
+      reference &&
+      typeof blocks !== 'undefined' &&
+      blocks[reference] &&
+      _toCompositeKey(blocks[reference]) === ck
+    ) {
+      return blocks[reference];
+    }
+    var cols = _activeColumnObjects();
+    for (var i = 0; i < cols.length; i++) {
+      for (var j = 0; j < cols[i].blocks.length; j++) {
+        var ref = cols[i].blocks[j];
+        var block = null;
+        var refCk = _toCompositeKey(ref);
+        if (
+          typeof ref === 'string' &&
+          typeof blocks !== 'undefined' &&
+          blocks[ref]
+        ) {
+          block = blocks[ref];
+          if (!refCk) refCk = _toCompositeKey(block);
+        } else if (typeof ref === 'object' && ref !== null) {
+          block = ref;
+        }
+        if (refCk === ck && block) return block;
+      }
     }
     return null;
   }
 
   function _getConfiguredWidthForCk(ck) {
-    if (typeof columns !== 'undefined') {
-      var colKeys = Object.keys(columns);
-      for (var i = 0; i < colKeys.length; i++) {
-        var col = columns[colKeys[i]];
-        if (!col || !Array.isArray(col.blocks)) continue;
-        for (var j = 0; j < col.blocks.length; j++) {
-          var ref = col.blocks[j];
-          var block = null;
-          var refCk = _toCompositeKey(ref);
-          if (
-            typeof ref === 'string' &&
-            typeof blocks !== 'undefined' &&
-            blocks[ref]
-          ) {
-            block = blocks[ref];
-            if (!refCk) refCk = _toCompositeKey(block);
-          } else if (typeof ref === 'object' && ref !== null) {
-            block = ref;
-          }
-          if (refCk === ck && block && typeof block.width !== 'undefined') {
-            return _parseWidth(block.width);
-          }
-        }
-      }
-    }
-
-    if (typeof blocks !== 'undefined') {
-      var blockKeys = Object.keys(blocks);
-      for (var bi = 0; bi < blockKeys.length; bi++) {
-        var b = blocks[blockKeys[bi]];
-        if (_toCompositeKey(b) === ck && b && typeof b.width !== 'undefined') {
-          return _parseWidth(b.width);
-        }
-      }
-    }
-    return 3;
+    var block = _getConfiguredScreenBlockForCk(ck);
+    return block && typeof block.width !== 'undefined'
+      ? _parseWidth(block.width)
+      : 3;
   }
 
   function _getConfiguredHeightForCk(ck) {
-    if (typeof columns !== 'undefined') {
-      var colKeys = Object.keys(columns);
-      for (var i = 0; i < colKeys.length; i++) {
-        var col = columns[colKeys[i]];
-        if (!col || !Array.isArray(col.blocks)) continue;
-        for (var j = 0; j < col.blocks.length; j++) {
-          var ref = col.blocks[j];
-          var block = null;
-          var refCk = _toCompositeKey(ref);
-          if (
-            typeof ref === 'string' &&
-            typeof blocks !== 'undefined' &&
-            blocks[ref]
-          ) {
-            block = blocks[ref];
-            if (!refCk) refCk = _toCompositeKey(block);
-          } else if (typeof ref === 'object' && ref !== null) {
-            block = ref;
-          }
-          if (refCk === ck && block && typeof block.height !== 'undefined') {
-            return _parseHeight(block.height);
-          }
-        }
-      }
-    }
-    return null;
+    var block = _getConfiguredScreenBlockForCk(ck);
+    return block && typeof block.height !== 'undefined'
+      ? _parseHeight(block.height)
+      : null;
   }
 
   function _parseHeight(value) {
@@ -8970,6 +13726,7 @@ var DashticzDeviceEditor = (function () {
     openCustom: openCustom,
     openMultiDevice: openMultiDevice,
     openGroup: openGroup,
+    openCluster: openCluster,
     openHtmlBlock: openHtmlBlock,
     openIframe: openIframe,
     openCalendar: openCalendar,
@@ -8978,6 +13735,10 @@ var DashticzDeviceEditor = (function () {
     openXmltvguide: openXmltvguide,
     openCamera: openCamera,
     openNews: openNews,
+    openF1: openF1,
+    openTvgids: openTvgids,
+    openFullykiosk: openFullykiosk,
+    openWeatherinfo: openWeatherinfo,
     openGraph: openGraph,
     openLms: openLms,
     openSlideButton: openSlideButton,
