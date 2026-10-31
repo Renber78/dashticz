@@ -1,6 +1,162 @@
 Release Notes
 =============
 
+v4.20.15 (28-10-2026)
+----------------------
+
+* **Fixes**
+
+- Graph tooltips: values with decimals (for example a Custom Sensor with 2.19)
+  were rounded to whole numbers in browsers with a decimal comma locale,
+  because the locale formatted tooltip text was parsed again. The tooltip now
+  uses the numeric data point value and honors the decimals setting (#1366).
+
+v4.20.14 (27-10-2026)
+----------------------
+
+* **Fixes**
+
+- Evohome/Ramses zone and hot water dials: the override until time is now sent
+  as local time. Domoticz copies the digits of the time into the controller's
+  clock and ignores the time zone, so with the previous UTC time the setpoint
+  fell back at once in time zones other than UTC (#1360).
+
+v4.20.13 (27-10-2026)
+----------------------
+
+* **Fixes**
+
+- Evohome/Ramses zone and hot water dials: setting a temperature no longer
+  sets the override until time to the moment you entered it (so the zone fell
+  back at once) when the boost duration setting is empty. The override now
+  defaults to 60 minutes for zones and 30 minutes for hot water, like the dial
+  display already did (#1360).
+
+v4.20.12 (25-10-2026)
+----------------------
+
+* **Enhancements**
+
+- Fully Kiosk: the progress fill of the charger button runs from ``#C0FCE1``
+  at the start to ``#059956`` at the end of the fill and is fully opaque, so the
+  color difference is clearly visible.
+
+v4.20.11 (25-10-2026)
+----------------------
+
+* **Fixes**
+
+- Fully Kiosk: the progress fill of the charger button showed no visible
+  gradient at a partial level, because the gradient was spread over the whole
+  bar and only its first part was visible. The fill is now as wide as the
+  level and the gradient runs over the filled part, from a light green to a
+  dark green.
+
+v4.20.10 (25-10-2026)
+----------------------
+
+* **Enhancements**
+
+- Fully Kiosk: the progress fill of the charger button runs from a very light
+  green at the start of the bar to a green at the end, without orange or other
+  colors.
+
+v4.20.9 (25-10-2026)
+----------------------
+
+* **Fixes**
+
+- Garbage: the title of the Garbage widget is right-aligned again like the
+  title of other blocks in the non-default themes. ``js/garbageconfig.js``
+  forced it to the left in every theme with an inline
+  ``text-align: left !important``; now only the default theme keeps it
+  left-aligned. The title also loses the extra 5px top margin, so it lines up
+  with the titles of neighbouring blocks.
+
+v4.20.8 (25-10-2026)
+----------------------
+
+* **Fixes**
+
+- Weather: Weather Underground is no longer supported, because its free API
+  stopped. The former ``wunderground``, ``currentweather`` and
+  ``currentweather_big`` blocks are shown with the regular weather block
+  (OpenWeatherMap or KNMI, ``config['owm_api']``); ``currentweather`` and
+  ``currentweather_big`` as a single "now" row.
+
+* **Code**
+
+- The Weather Underground scripts (``js/weather.js``, the unused
+  ``js/weather_owm.js``), its settings (``wu_api``, ``wu_city``, ``wu_name``,
+  ``wu_country``) and the provider choice in the Widget Editor are removed,
+  together with the Skycons icons (about 11 KB less JavaScript).
+
+v4.20.7 (25-10-2026)
+----------------------
+
+* **Code**
+
+- Security panel: the hidden device information (bottom left screw) is
+  determined without the mobile-detect library, which is removed (about
+  38 KB less JavaScript).
+
+v4.20.6 (25-10-2026)
+----------------------
+
+* **Code**
+
+- ``playsound``, ``playsoundOn`` and ``playsoundOff`` use the browser's own
+  audio element instead of ion.sound (last release 2016). As before, the
+  configured file is used first and otherwise the same name in another format
+  (mp3, ogg, aac) from the sounds folder (about 12 KB less JavaScript).
+
+v4.20.5 (25-10-2026)
+----------------------
+
+* **Code**
+
+- RGB dimmers: ``colorpicker: 1`` (the old Spectrum colorpicker) now shows
+  the same colorpicker as ``colorpicker: 2``. spectrum-colorpicker and its
+  styles are removed (about 27 KB less JavaScript).
+
+v4.20.4 (25-10-2026)
+----------------------
+
+* **Fixes**
+
+- Graphs: the time axis uses the Dashticz language for month and day names,
+  and ``displayFormats`` accept the Day.js (moment style) tokens shown in the
+  documentation, such as ``'MMM D'`` or ``'ll'``. Formats in the former
+  date-fns notation (``'EEE d MMM'``, ``'yyyy'``) keep working.
+
+* **Code**
+
+- The Chart.js date adapter is built on Day.js; date-fns and
+  chartjs-adapter-date-fns are removed (about 44 KB less JavaScript).
+
+v4.20.3 (25-10-2026)
+----------------------
+
+* **Fixes**
+
+- Calendar, Garbage and F1: all iCalendar data is read with one library,
+  `sabre/vobject <https://github.com/sabre-io/vobject>`_. Recurring events
+  are expanded according to RFC 5545: biweekly events (``INTERVAL=2``),
+  extra dates (``RDATE``), excluded dates (``EXDATE``), moved occurrences,
+  the last weekday or day of the month, and yearly events on 29 February.
+- Calendar: one broken or endless recurring event is skipped (with a warning
+  in the browser console) instead of hiding the whole calendar.
+- Garbage: iCal based companies are read by the same calendar bridge on the
+  server, so recurring pickup dates are shown as well.
+
+* **Code**
+
+- The calendar ``method`` option is no longer used; methods 0, 1 and 2
+  (SG_iCal, om/icalparser and johngrogg/ics-parser) are replaced by
+  sabre/vobject 4.6 (PHP 7.4 or newer, ``mbstring``).
+- ical.js is removed from the browser bundle.
+- The last part of the version number goes up with every change.
+
 v4.20.2 (16-10-2026)
 ----------------------
 

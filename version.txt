@@ -1,4 +1,4 @@
 {
-    "version": "4.20.2",
-    "last_changes": "The HVC garbage option uses the new host inzamelkalender.hvcgroep.nl, because apps.hvcgroep.nl no longer resolves (#1352). Calendar events that repeat on the last weekday of the month (for example BYDAY=-1FR) now show the last one instead of the second-to-last one in months with five of that weekday (#1353)."
+    "version": "4.20.15",
+    "last_changes": "Graph tooltips: decimals of the values (e.g. Custom Sensor values like 2,19) are no longer dropped to whole numbers in browsers with a decimal comma locale. The tooltip now uses the numeric data point value instead of parsing the locale formatted text, and honors the decimals setting (#1366)."
 }
